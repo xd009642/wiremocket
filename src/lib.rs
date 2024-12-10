@@ -1,14 +1,26 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # webmocket
+//!
+//! A library for creating testing websockets.
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use webmocket::prelude::*;
+//!
+//! fn main() -> Result<(), webmocket::Error> {
+//!     let mut webmocket = Webmocket::default();
+//!     todo!();
+//! }
+//! ```
+pub(crate) mod constants;
+pub mod errors;
+pub mod message;
+pub mod prelude;
+pub mod server;
 
+#[allow(unused_imports)]
 #[cfg(test)]
 mod tests {
-    use super::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    use super::*;
 }
