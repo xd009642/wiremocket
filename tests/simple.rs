@@ -1,45 +1,52 @@
+use bytes::Bytes;
 use futures::SinkExt;
 use serde_json::json;
+use std::time::Duration;
+use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tungstenite::Message;
 use webmocket::*;
 
 #[tokio::test]
 async fn can_connect() {
-    let server = MockServer::start();
+    let server = MockServer::start().await;
+
+    println!("connecting to: {}", server.uri());
 
     let (stream, response) = connect_async(server.uri()).await.unwrap();
 }
 
 #[tokio::test]
 async fn only_json_matcher() {
-    let server = MockServer::start();
+    let server = MockServer::start().await;
 
-    server.register(Mock::given(ValidJsonMatcher));
+    server.register(Mock::given(ValidJsonMatcher)).await;
 
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 
     let val = json!({"hello": "world"});
 
     stream.send(Message::text(val.to_string())).await.unwrap();
-    stream
-        .send(Message::binary(val.to_string().as_bytes()))
-        .await
-        .unwrap();
 
-    server.verify()
+    let b = Bytes::from(serde_json::to_vec(&val).unwrap());
+
+    stream.send(Message::binary(b)).await.unwrap();
+
+    server.verify().await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn deny_invalid_json() {
-    let server = MockServer::start();
+    let server = MockServer::start().await;
 
-    server.register(Mock::given(ValidJsonMatcher));
+    server.register(Mock::given(ValidJsonMatcher)).await;
 
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 
     stream.send(Message::text("I'm not json")).await.unwrap();
 
-    server.verify()
+    sleep(Duration::from_millis(100)).await;
+
+    server.verify().await;
 }

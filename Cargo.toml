@@ -9,10 +9,13 @@ tokio-tungstenite = ["dep:tokio-tungstenite"]
 serde_json = ["dep:serde_json"]
 
 [dependencies]
+axum = { version = "0.8.1", features = ["ws"] }
 serde_json = { version = "1.0.133", optional = true }
-tokio-tungstenite = { version = "0.24.0", optional = true }
-tungstenite = "0.24.0"
+tokio = { version = "1.42.0", features = ["sync", "net"] }
+tokio-tungstenite = { version = "0.26.0", optional = true }
+tungstenite = "0.26.0"
 
 [dev-dependencies]
+bytes = "1.9.0"
 futures = "0.3.31"
-tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread", "time"] }
