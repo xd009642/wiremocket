@@ -58,7 +58,9 @@ impl Mock {
         self.matcher.push(Arc::new(matcher));
     }
 
-    fn verify(&self) -> bool {
+    /// You can use this to verify the mock separately to the one you put into the server (if
+    /// you've cloned it).
+    pub fn verify(&self) -> bool {
         self.expected_calls
             .contains(self.calls.load(Ordering::SeqCst))
     }
