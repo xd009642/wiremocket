@@ -20,7 +20,9 @@ async fn can_connect() {
 async fn only_json_matcher() {
     let server = MockServer::start().await;
 
-    server.register(Mock::given(ValidJsonMatcher)).await;
+    server
+        .register(Mock::given(ValidJsonMatcher).expect(1..))
+        .await;
 
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 
@@ -32,6 +34,8 @@ async fn only_json_matcher() {
 
     stream.send(Message::binary(b)).await.unwrap();
 
+    sleep(Duration::from_millis(100)).await;
+
     server.verify().await;
 }
 
@@ -40,7 +44,9 @@ async fn only_json_matcher() {
 async fn deny_invalid_json() {
     let server = MockServer::start().await;
 
-    server.register(Mock::given(ValidJsonMatcher)).await;
+    server
+        .register(Mock::given(ValidJsonMatcher).expect(1))
+        .await;
 
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 

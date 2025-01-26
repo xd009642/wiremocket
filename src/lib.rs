@@ -1,4 +1,5 @@
 //! API slightly based off wiremock in that you start a server
+use crate::utils::*;
 use axum::{
     extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
     response::Response,
@@ -6,13 +7,18 @@ use axum::{
     Extension, Router,
 };
 use std::future::IntoFuture;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::Instant;
 use tokio::sync::{oneshot, RwLock};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
     Message,
 };
+
+pub mod utils;
 
 type MockList = Arc<RwLock<Vec<Mock>>>;
 
@@ -22,7 +28,6 @@ pub struct MockServer {
     addr: String,
     shutdown: Option<oneshot::Sender<()>>,
     mocks: MockList,
-    verify_status: Arc<RwLock<bool>>,
 }
 
 /// Specify things like the routes this responds to i.e. `/api/ws-stream` query parameters, and
@@ -31,17 +36,31 @@ pub struct MockServer {
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
+    expected_calls: Arc<Times>,
+    calls: Arc<AtomicU64>,
 }
 
 impl Mock {
     pub fn given(matcher: impl Match + Send + Sync + 'static) -> Self {
         Self {
             matcher: vec![Arc::new(matcher)],
+            expected_calls: Default::default(),
+            calls: Default::default(),
         }
+    }
+
+    pub fn expect(mut self, times: impl Into<Times>) -> Self {
+        self.expected_calls = Arc::new(times.into());
+        self
     }
 
     pub fn add_matcher(&mut self, matcher: impl Match + Send + Sync + 'static) {
         self.matcher.push(Arc::new(matcher));
+    }
+
+    fn verify(&self) -> bool {
+        self.expected_calls
+            .contains(self.calls.load(Ordering::SeqCst))
     }
 }
 
@@ -50,12 +69,8 @@ pub struct RecordedConnection {
     outgoing: Vec<(Instant, Message)>,
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    mocks: Extension<MockList>,
-    match_status: Extension<Arc<RwLock<bool>>>,
-) -> Response {
-    ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0, match_status.0).await })
+async fn ws_handler(ws: WebSocketUpgrade, mocks: Extension<MockList>) -> Response {
+    ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0).await })
 }
 
 fn convert_message(msg: AxumMessage) -> Message {
@@ -71,7 +86,7 @@ fn convert_message(msg: AxumMessage) -> Message {
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, mocks: MockList, match_status: Arc<RwLock<bool>>) {
+async fn handle_socket(mut socket: WebSocket, mocks: MockList) {
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
     println!("{} mocks loaded", mocks.len());
@@ -81,16 +96,11 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, match_status: Arc
             println!("Checking: {:?}", msg);
             // TODO need to figure out relationship between mocks and matchers!
             for mock in &mocks {
-                for matcher in &mock.matcher {
-                    if !matcher.unary_match(&msg) {
-                        println!("{:?} was not json", msg);
-                        *match_status.write().await = false;
-                    }
+                if mock.matcher.iter().all(|x| x.unary_match(&msg)) {
+                    println!("One match");
+                    mock.calls.fetch_add(1, Ordering::Acquire);
                 }
             }
-        } else {
-            println!("Invalid message");
-            *match_status.write().await = false;
         }
     }
 }
@@ -106,12 +116,10 @@ impl MockServer {
     /// application interacts with and needs mocking for testing purposes.
     pub async fn start() -> Self {
         let mocks: MockList = Default::default();
-        let verify_status: Arc<RwLock<bool>> = Arc::new(RwLock::new(true));
 
         let router = Router::new()
             .route("/", any(ws_handler))
-            .layer(Extension(mocks.clone()))
-            .layer(Extension(verify_status.clone()));
+            .layer(Extension(mocks.clone()));
         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = format!("ws://{}", listener.local_addr().unwrap());
 
@@ -126,7 +134,6 @@ impl MockServer {
             addr,
             shutdown: Some(tx),
             mocks,
-            verify_status,
         }
     }
 
@@ -151,7 +158,9 @@ impl MockServer {
     }
 
     pub async fn verify(&self) {
-        assert!(*self.verify_status.read().await)
+        for mock in self.mocks.read().await.iter() {
+            assert!(mock.verify())
+        }
     }
 }
 
