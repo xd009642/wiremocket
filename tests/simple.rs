@@ -34,6 +34,7 @@ async fn only_json_matcher() {
 
     stream.send(Message::binary(b)).await.unwrap();
 
+    // TODO there should be a better way than this
     sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
@@ -52,6 +53,7 @@ async fn deny_invalid_json() {
 
     stream.send(Message::text("I'm not json")).await.unwrap();
 
+    // TODO there should be a better way than this
     sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
