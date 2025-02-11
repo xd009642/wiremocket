@@ -1,11 +1,16 @@
 //! API slightly based off wiremock in that you start a server
 use crate::utils::*;
 use axum::{
-    extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+    extract::{
+        ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+        Path, Query,
+    },
+    http::header::HeaderMap,
     response::Response,
     routing::any,
     Extension, Router,
 };
+use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -13,12 +18,19 @@ use std::sync::{
 };
 use std::time::Instant;
 use tokio::sync::{oneshot, RwLock};
+use tracing::{debug, Instrument};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
     Message,
 };
 
+pub mod matchers;
 pub mod utils;
+
+pub mod prelude {
+    pub use super::*;
+    pub use crate::matchers::*;
+}
 
 type MockList = Arc<RwLock<Vec<Mock>>>;
 
@@ -71,7 +83,36 @@ pub struct RecordedConnection {
     outgoing: Vec<(Instant, Message)>,
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, mocks: Extension<MockList>) -> Response {
+async fn ws_handler_pathless(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    params: Query<HashMap<String, String>>,
+    mocks: Extension<MockList>,
+) -> Response {
+    ws_handler(ws, Path(String::new()), headers, params, mocks).await
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+    mocks: Extension<MockList>,
+) -> Response {
+    {
+        debug!("checking request level matches");
+        let mocks = mocks.read().await.clone();
+        for mock in &mocks {
+            if mock
+                .matcher
+                .iter()
+                .all(|x| x.request_match(&path, &headers, &params))
+            {
+                mock.calls.fetch_add(1, Ordering::Acquire);
+            }
+        }
+    }
+    debug!("about to upgrade websocket connection");
     ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0).await })
 }
 
@@ -95,11 +136,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList) {
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
-            println!("Checking: {:?}", msg);
-            // TODO need to figure out relationship between mocks and matchers!
+            debug!("Checking: {:?}", msg);
             for mock in &mocks {
                 if mock.matcher.iter().all(|x| x.unary_match(&msg)) {
-                    println!("One match");
                     mock.calls.fetch_add(1, Ordering::Acquire);
                 }
             }
@@ -120,17 +159,20 @@ impl MockServer {
         let mocks: MockList = Default::default();
 
         let router = Router::new()
-            .route("/", any(ws_handler))
+            .route("/{*path}", any(ws_handler))
+            .route("/", any(ws_handler_pathless))
             .layer(Extension(mocks.clone()));
         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = format!("ws://{}", listener.local_addr().unwrap());
+
+        debug!("axum listening on: {}", addr);
 
         let (tx, rx) = oneshot::channel();
         let listening_server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = rx.await;
         });
 
-        tokio::task::spawn(listening_server.into_future());
+        tokio::task::spawn(listening_server.into_future().in_current_span());
 
         Self {
             addr,
@@ -174,28 +216,26 @@ impl Drop for MockServer {
 }
 
 pub trait Match {
-    fn unary_match(&self, msg: &Message) -> bool {
-        true
+    fn request_match(
+        &self,
+        path: &str,
+        headers: &HeaderMap,
+        query: &HashMap<String, String>,
+    ) -> bool {
+        false
+    }
+
+    fn unary_match(&self, message: &Message) -> bool {
+        false
     }
 }
 
-#[cfg(feature = "serde_json")]
-pub use json::*;
-
-#[cfg(feature = "serde_json")]
-pub mod json {
-    use super::*;
-    use serde_json::Value;
-
-    pub struct ValidJsonMatcher;
-
-    impl Match for ValidJsonMatcher {
-        fn unary_match(&self, msg: &Message) -> bool {
-            match msg {
-                Message::Text(t) => serde_json::from_str::<Value>(&t).is_ok(),
-                Message::Binary(b) => serde_json::from_slice::<Value>(b.as_ref()).is_ok(),
-                _ => true, // We can't be judging pings/pongs/closes
-            }
-        }
+impl<F> Match for F
+where
+    F: Fn(&Message) -> bool,
+    F: Send + Sync,
+{
+    fn unary_match(&self, msg: &Message) -> bool {
+        self(msg)
     }
 }
