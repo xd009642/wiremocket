@@ -76,16 +76,24 @@ pub struct RecordedConnection {
     outgoing: Vec<(Instant, Message)>,
 }
 
+async fn ws_handler_pathless(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    params: Query<HashMap<String, String>>,
+    mocks: Extension<MockList>,
+) -> Response {
+    ws_handler(ws, Path(String::new()), headers, params, mocks).await
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    Path(path): Path<Vec<String>>,
+    Path(path): Path<String>,
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
     mocks: Extension<MockList>,
 ) -> Response {
     {
         let mocks = mocks.read().await.clone();
-        let path = path.join("/");
         for mock in &mocks {
             if mock
                 .matcher
@@ -144,7 +152,8 @@ impl MockServer {
         let mocks: MockList = Default::default();
 
         let router = Router::new()
-            .route("/", any(ws_handler))
+            .route("/{*path}", any(ws_handler))
+            .route("/", any(ws_handler_pathless))
             .layer(Extension(mocks.clone()));
         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = format!("ws://{}", listener.local_addr().unwrap());
@@ -204,7 +213,7 @@ pub trait Match {
         headers: &HeaderMap,
         query: &HashMap<String, String>,
     ) -> bool {
-        false 
+        false
     }
 
     fn unary_match(&self, message: &Message) -> bool {
