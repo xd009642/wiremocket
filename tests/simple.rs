@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::Message;
-use webmocket::*;
+use webmocket::prelude::*;
 
 #[tokio::test]
 #[traced_test]
