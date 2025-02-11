@@ -54,7 +54,21 @@ async fn deny_invalid_json() {
     stream.send(Message::text("I'm not json")).await.unwrap();
 
     // TODO there should be a better way than this
-    sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(200)).await;
+
+    server.verify().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn match_path() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(path("/api/stream")).expect(1..))
+        .await;
+
+    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri())).await.unwrap();
 
     server.verify().await;
 }

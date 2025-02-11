@@ -1,11 +1,16 @@
 //! API slightly based off wiremock in that you start a server
 use crate::utils::*;
 use axum::{
-    extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+    extract::{
+        ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+        Path, Query, Request,
+    },
+    http::header::HeaderMap,
     response::Response,
     routing::any,
     Extension, Router,
 };
+use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -71,7 +76,26 @@ pub struct RecordedConnection {
     outgoing: Vec<(Instant, Message)>,
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, mocks: Extension<MockList>) -> Response {
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    Path(path): Path<Vec<String>>,
+    headers: HeaderMap,
+    Query(params): Query<HashMap<String, String>>,
+    mocks: Extension<MockList>,
+) -> Response {
+    {
+        let mocks = mocks.read().await.clone();
+        let path = path.join("/");
+        for mock in &mocks {
+            if mock
+                .matcher
+                .iter()
+                .all(|x| x.request_match(&path, &headers, &params))
+            {
+                mock.calls.fetch_add(1, Ordering::Acquire);
+            }
+        }
+    }
     ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0).await })
 }
 
@@ -174,8 +198,53 @@ impl Drop for MockServer {
 }
 
 pub trait Match {
+    fn request_match(
+        &self,
+        path: &str,
+        headers: &HeaderMap,
+        query: &HashMap<String, String>,
+    ) -> bool {
+        false 
+    }
+
+    fn unary_match(&self, message: &Message) -> bool {
+        false
+    }
+}
+
+impl<F> Match for F
+where
+    F: Fn(&Message) -> bool,
+    F: Send + Sync,
+{
     fn unary_match(&self, msg: &Message) -> bool {
-        true
+        self(msg)
+    }
+}
+
+pub struct PathExactMatcher(String);
+
+pub fn path<T>(path: T) -> PathExactMatcher
+where
+    T: Into<String>,
+{
+    PathExactMatcher::new(path)
+}
+
+impl PathExactMatcher {
+    pub fn new<T: Into<String>>(path: T) -> Self {
+        Self(path.into())
+    }
+}
+
+impl Match for PathExactMatcher {
+    fn request_match(
+        &self,
+        path: &str,
+        _headers: &HeaderMap,
+        _query: &HashMap<String, String>,
+    ) -> bool {
+        self.0 == path
     }
 }
 
