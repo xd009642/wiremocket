@@ -3,7 +3,7 @@ use crate::utils::*;
 use axum::{
     extract::{
         ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
-        Path, Query, Request,
+        Path, Query,
     },
     http::header::HeaderMap,
     response::Response,
@@ -18,6 +18,7 @@ use std::sync::{
 };
 use std::time::Instant;
 use tokio::sync::{oneshot, RwLock};
+use tracing::{debug, Instrument};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
     Message,
@@ -99,6 +100,7 @@ async fn ws_handler(
     mocks: Extension<MockList>,
 ) -> Response {
     {
+        debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for mock in &mocks {
             if mock
@@ -110,6 +112,7 @@ async fn ws_handler(
             }
         }
     }
+    debug!("about to upgrade websocket connection");
     ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0).await })
 }
 
@@ -133,11 +136,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList) {
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
-            println!("Checking: {:?}", msg);
-            // TODO need to figure out relationship between mocks and matchers!
+            debug!("Checking: {:?}", msg);
             for mock in &mocks {
                 if mock.matcher.iter().all(|x| x.unary_match(&msg)) {
-                    println!("One match");
                     mock.calls.fetch_add(1, Ordering::Acquire);
                 }
             }
@@ -164,12 +165,14 @@ impl MockServer {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = format!("ws://{}", listener.local_addr().unwrap());
 
+        debug!("axum listening on: {}", addr);
+
         let (tx, rx) = oneshot::channel();
         let listening_server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = rx.await;
         });
 
-        tokio::task::spawn(listening_server.into_future());
+        tokio::task::spawn(listening_server.into_future().in_current_span());
 
         Self {
             addr,
@@ -219,7 +222,7 @@ pub trait Match {
         headers: &HeaderMap,
         query: &HashMap<String, String>,
     ) -> bool {
-        false 
+        false
     }
 
     fn unary_match(&self, message: &Message) -> bool {
