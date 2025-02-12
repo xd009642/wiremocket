@@ -1,4 +1,5 @@
 //! API slightly based off wiremock in that you start a server
+use crate::responder::{pending, ResponseStream};
 use crate::utils::*;
 use axum::{
     extract::{
@@ -25,6 +26,7 @@ use tungstenite::{
 };
 
 pub mod matchers;
+pub mod responder;
 pub mod utils;
 
 pub mod prelude {
@@ -48,6 +50,7 @@ pub struct MockServer {
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
+    responder: Arc<dyn ResponseStream + Send + Sync + 'static>,
     expected_calls: Arc<Times>,
     calls: Arc<AtomicU64>,
 }
@@ -57,6 +60,7 @@ impl Mock {
         Self {
             matcher: vec![Arc::new(matcher)],
             expected_calls: Default::default(),
+            responder: Arc::new(pending()),
             calls: Default::default(),
         }
     }
