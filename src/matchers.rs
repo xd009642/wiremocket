@@ -25,8 +25,8 @@ impl Match for PathExactMatcher {
         path: &str,
         _headers: &HeaderMap,
         _query: &HashMap<String, String>,
-    ) -> bool {
-        self.0 == path
+    ) -> Option<bool> {
+        Some(self.0 == path)
     }
 }
 
@@ -38,11 +38,9 @@ impl Match for HeaderExactMatcher {
         _path: &str,
         headers: &HeaderMap,
         _query: &HashMap<String, String>,
-    ) -> bool {
+    ) -> Option<bool> {
         let all_values = headers.get_all(&self.0);
-        println!("All: {:?}", all_values);
-        println!("Checking against: {:?}: {:?}", self.0, self.1);
-        self.1.iter().all(|x| all_values.iter().any(|v| v == x))
+        Some(self.1.iter().all(|x| all_values.iter().any(|v| v == x)))
     }
 }
 
@@ -71,8 +69,8 @@ impl Match for HeaderExistsMatcher {
         _path: &str,
         headers: &HeaderMap,
         _query: &HashMap<String, String>,
-    ) -> bool {
-        headers.contains_key(&self.0)
+    ) -> Option<bool> {
+        Some(headers.contains_key(&self.0))
     }
 }
 
@@ -98,8 +96,8 @@ impl Match for QueryParamExactMatcher {
         _path: &str,
         _headers: &HeaderMap,
         query: &HashMap<String, String>,
-    ) -> bool {
-        query.get(&self.name) == Some(&self.value)
+    ) -> Option<bool> {
+        Some(query.get(&self.name) == Some(&self.value))
     }
 }
 
@@ -123,11 +121,11 @@ impl Match for QueryParamContainsMatcher {
         _path: &str,
         _headers: &HeaderMap,
         query: &HashMap<String, String>,
-    ) -> bool {
+    ) -> Option<bool> {
         if let Some(s) = query.get(&self.name) {
-            s.contains(&self.value)
+            Some(s.contains(&self.value))
         } else {
-            false
+            Some(false)
         }
     }
 }
@@ -149,8 +147,8 @@ impl Match for QueryParamIsMissingMatcher {
         _path: &str,
         _headers: &HeaderMap,
         query: &HashMap<String, String>,
-    ) -> bool {
-        !query.contains_key(&self.0)
+    ) -> Option<bool> {
+        Some(!query.contains_key(&self.0))
     }
 }
 
@@ -171,11 +169,11 @@ pub mod json {
     pub struct ValidJsonMatcher;
 
     impl Match for ValidJsonMatcher {
-        fn unary_match(&self, msg: &Message) -> bool {
+        fn unary_match(&self, msg: &Message) -> Option<bool> {
             match msg {
-                Message::Text(t) => serde_json::from_str::<Value>(&t).is_ok(),
-                Message::Binary(b) => serde_json::from_slice::<Value>(b.as_ref()).is_ok(),
-                _ => false, // We can't be judging pings/pongs/closes
+                Message::Text(t) => Some(serde_json::from_str::<Value>(&t).is_ok()),
+                Message::Binary(b) => Some(serde_json::from_slice::<Value>(b.as_ref()).is_ok()),
+                _ => None,
             }
         }
     }

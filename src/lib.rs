@@ -66,8 +66,9 @@ impl Mock {
         self
     }
 
-    pub fn add_matcher(&mut self, matcher: impl Match + Send + Sync + 'static) {
+    pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
         self.matcher.push(Arc::new(matcher));
+        self
     }
 
     /// You can use this to verify the mock separately to the one you put into the server (if
@@ -92,6 +93,11 @@ async fn ws_handler_pathless(
     ws_handler(ws, Path(String::new()), headers, params, mocks).await
 }
 
+#[inline(always)]
+fn can_consider(match_res: Option<bool>) -> bool {
+    matches!(match_res, Some(true) | None)
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Path(path): Path<String>,
@@ -99,21 +105,24 @@ async fn ws_handler(
     Query(params): Query<HashMap<String, String>>,
     mocks: Extension<MockList>,
 ) -> Response {
+    let mut active_mocks = vec![];
     {
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
-        for mock in &mocks {
+        for (index, mock) in mocks.iter().enumerate() {
             if mock
                 .matcher
                 .iter()
-                .all(|x| x.request_match(&path, &headers, &params))
+                .map(|x| x.request_match(&path, &headers, &params))
+                .all(can_consider)
             {
                 mock.calls.fetch_add(1, Ordering::Acquire);
+                active_mocks.push(index);
             }
         }
     }
     debug!("about to upgrade websocket connection");
-    ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0).await })
+    ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0, active_mocks).await })
 }
 
 fn convert_message(msg: AxumMessage) -> Message {
@@ -129,16 +138,25 @@ fn convert_message(msg: AxumMessage) -> Message {
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, mocks: MockList) {
+async fn handle_socket(mut socket: WebSocket, mocks: MockList, active_mocks: Vec<usize>) {
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
+    let active_mocks = active_mocks
+        .iter()
+        .filter_map(|m| mocks.get(*m))
+        .collect::<Vec<&Mock>>();
     println!("{} mocks loaded", mocks.len());
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
             debug!("Checking: {:?}", msg);
-            for mock in &mocks {
-                if mock.matcher.iter().all(|x| x.unary_match(&msg)) {
+            for mock in &active_mocks {
+                if mock
+                    .matcher
+                    .iter()
+                    .map(|x| x.unary_match(&msg))
+                    .all(can_consider)
+                {
                     mock.calls.fetch_add(1, Ordering::Acquire);
                 }
             }
@@ -206,6 +224,10 @@ impl MockServer {
             assert!(mock.verify())
         }
     }
+
+    pub async fn mocks_pass(&self) -> bool {
+        self.mocks.read().await.iter().all(|x| x.verify())
+    }
 }
 
 impl Drop for MockServer {
@@ -221,12 +243,12 @@ pub trait Match {
         path: &str,
         headers: &HeaderMap,
         query: &HashMap<String, String>,
-    ) -> bool {
-        false
+    ) -> Option<bool> {
+        None
     }
 
-    fn unary_match(&self, message: &Message) -> bool {
-        false
+    fn unary_match(&self, message: &Message) -> Option<bool> {
+        None
     }
 }
 
@@ -235,7 +257,7 @@ where
     F: Fn(&Message) -> bool,
     F: Send + Sync,
 {
-    fn unary_match(&self, msg: &Message) -> bool {
-        self(msg)
+    fn unary_match(&self, msg: &Message) -> Option<bool> {
+        Some(self(msg))
     }
 }
