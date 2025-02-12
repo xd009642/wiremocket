@@ -184,9 +184,9 @@ async fn header_doesnt_match() {
 async fn query_param_matchers() {
     let server = MockServer::start().await;
 
-    let mut mock = Mock::given(QueryParamExactMatcher::new("hello", "world"));
-    mock.add_matcher(QueryParamContainsMatcher::new("foo", "ar"));
-    mock.add_matcher(QueryParamIsMissingMatcher::new("not_here"));
+    let mut mock = Mock::given(QueryParamExactMatcher::new("hello", "world"))
+        .add_matcher(QueryParamContainsMatcher::new("foo", "ar"))
+        .add_matcher(QueryParamIsMissingMatcher::new("not_here"));
 
     server.register(mock.expect(1..)).await;
 
@@ -196,4 +196,40 @@ async fn query_param_matchers() {
     let (stream, response) = connect_async(uri).await.unwrap();
 
     server.verify().await;
+}
+
+#[tokio::test]
+#[traced_test]
+async fn combine_request_and_content_matchers() {
+    let server = MockServer::start().await;
+
+    server
+        .register(
+            Mock::given(path("api/stream"))
+                .add_matcher(ValidJsonMatcher)
+                .expect(1..),
+        )
+        .await;
+
+    let (mut stream, response) = connect_async(format!("{}/api", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let val = json!({"hello": "world"});
+    stream.send(Message::text(val.to_string())).await.unwrap();
+    sleep(Duration::from_millis(200)).await;
+
+    assert!(!server.mocks_pass().await);
+
+    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let val = json!({"hello": "world"});
+    stream.send(Message::text(val.to_string())).await.unwrap();
+    sleep(Duration::from_millis(200)).await;
+
+    assert!(server.mocks_pass().await);
 }
