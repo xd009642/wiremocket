@@ -21,6 +21,26 @@ async fn can_connect() {
 
 #[tokio::test]
 #[traced_test]
+async fn no_matches() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(ValidJsonMatcher).expect(0))
+        .await;
+
+    let other_mock = Mock::given(path("/api")).named("path").expect(0);
+
+    server.register(other_mock).await;
+
+    let (mut stream, response) = connect_async(server.uri()).await.unwrap();
+
+    server.verify().await;
+    assert!(logs_contain("mock[0]"));
+    assert!(logs_contain("mock: path"));
+}
+
+#[tokio::test]
+#[traced_test]
 async fn only_json_matcher() {
     let server = MockServer::start().await;
 

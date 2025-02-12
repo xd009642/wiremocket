@@ -53,6 +53,7 @@ pub struct Mock {
     responder: Arc<dyn ResponseStream + Send + Sync + 'static>,
     expected_calls: Arc<Times>,
     calls: Arc<AtomicU64>,
+    name: Option<String>,
 }
 
 impl Mock {
@@ -62,7 +63,12 @@ impl Mock {
             expected_calls: Default::default(),
             responder: Arc::new(pending()),
             calls: Default::default(),
+            name: None,
         }
+    }
+    pub fn named<T: Into<String>>(mut self, mock_name: T) -> Self {
+        self.name = Some(mock_name.into());
+        self
     }
 
     pub fn expect(mut self, times: impl Into<Times>) -> Self {
@@ -114,13 +120,16 @@ async fn ws_handler(
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
-            if mock
+            let values = mock
                 .matcher
                 .iter()
                 .map(|x| x.request_match(&path, &headers, &params))
-                .all(can_consider)
-            {
-                mock.calls.fetch_add(1, Ordering::Acquire);
+                .collect::<Vec<Option<bool>>>();
+
+            if values.iter().copied().all(can_consider) {
+                if values.contains(&Some(true)) {
+                    mock.calls.fetch_add(1, Ordering::Acquire);
+                }
                 active_mocks.push(index);
             }
         }
@@ -149,19 +158,21 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, active_mocks: Vec
         .iter()
         .filter_map(|m| mocks.get(*m))
         .collect::<Vec<&Mock>>();
-    println!("{} mocks loaded", mocks.len());
     while let Some(msg) = socket.recv().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
             debug!("Checking: {:?}", msg);
             for mock in &active_mocks {
-                if mock
+                let values = mock
                     .matcher
                     .iter()
                     .map(|x| x.unary_match(&msg))
-                    .all(can_consider)
-                {
-                    mock.calls.fetch_add(1, Ordering::Acquire);
+                    .collect::<Vec<Option<bool>>>();
+
+                if values.iter().copied().all(can_consider) {
+                    if values.contains(&Some(true)) {
+                        mock.calls.fetch_add(1, Ordering::Acquire);
+                    }
                 }
             }
         }
@@ -224,7 +235,12 @@ impl MockServer {
     }
 
     pub async fn verify(&self) {
-        for mock in self.mocks.read().await.iter() {
+        for (index, mock) in self.mocks.read().await.iter().enumerate() {
+            println!("Checking {:?} {:?}", mock.expected_calls, mock.calls);
+            match &mock.name {
+                None => debug!("Checking mock[{}]", index),
+                Some(name) => debug!("Checking mock: {}", name),
+            }
             assert!(mock.verify())
         }
     }
