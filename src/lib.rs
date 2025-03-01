@@ -44,16 +44,16 @@ pub struct MockServer {
     mocks: MockList,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 enum MatchStatus {
-    /// Every matcher returns Some(rue)
-    Full,
-    /// Some matchers return Some(true) some None
-    Partial,
-    /// All matchers return None
-    Potential,
     /// One or more matchers return Some(false)
     Mismatch,
+    /// All matchers return None
+    Potential,
+    /// Some matchers return Some(true) some None
+    Partial,
+    /// Every matcher returns Some(rue)
+    Full,
 }
 
 /// Specify things like the routes this responds to i.e. `/api/ws-stream` query parameters, and
@@ -197,16 +197,37 @@ async fn ws_handler(
     mocks: Extension<MockList>,
 ) -> Response {
     let mut active_mocks = vec![];
+    let mut matched_mock = None;
     {
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
             let mock_status = mock.check_request(&path, &headers, &params);
+
             if mock_status != MatchStatus::Mismatch {
                 active_mocks.push(index);
             }
+
+            if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
+                if let Some((best_index, status, priority)) = &mut matched_mock {
+                    if mock_status > *status
+                        || (mock_status == *status && mock.priority < *priority)
+                    {
+                        *best_index = index;
+                        *status = mock_status;
+                        *priority = mock.priority
+                    }
+                } else {
+                    matched_mock = Some((index, mock_status, mock.priority));
+                }
+            }
         }
     }
+
+    if let Some((index, status, priority)) = matched_mock {
+        active_mocks = vec![index];
+    }
+
     debug!("about to upgrade websocket connection");
     ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0, active_mocks).await })
 }
