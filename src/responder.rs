@@ -25,32 +25,20 @@ use tungstenite::Message;
 // that sends to it into the `Match` trait so people can send responses on matches). Or I make the
 // responder take the last client message as an output.
 
-pub trait ResponseStreamBuilder {
-    fn create_response_stream(&self) -> Box<dyn ResponseStream + Send + Sync + 'static>;
-}
-
 pub trait ResponseStream {
-    fn handle(self, input: mpsc::Receiver<Message>) -> BoxStream<'static, Message>;
+    fn handle(&self, input: mpsc::Receiver<Message>) -> BoxStream<'static, Message>;
 }
 
-impl ResponseStream for BoxStream<'static, Message> {
-    fn handle(self, _: mpsc::Receiver<Message>) -> BoxStream<'static, Message> {
-        self
-    }
-}
-
-pub fn pending() -> impl ResponseStream + Send + Sync + 'static {
-    stream::pending()
-}
-
-impl<F, S> ResponseStreamBuilder for F
+impl<F, S> ResponseStream for F
 where
     F: Fn() -> S,
     S: Stream<Item = Message> + Send + Sync + 'static,
 {
-    fn create_response_stream(&self) -> Box<dyn ResponseStream + Send + Sync + 'static> {
-        Box::new(self().boxed())
+    fn handle(&self, _: mpsc::Receiver<Message>) -> BoxStream<'static, Message> {
+        self().boxed()
     }
 }
 
-// TODO we need rate throttling UX at some point
+pub fn pending() -> impl ResponseStream + Send + Sync + 'static {
+    stream::pending
+}

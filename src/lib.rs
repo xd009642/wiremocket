@@ -1,5 +1,5 @@
 //! API slightly based off wiremock in that you start a server
-use crate::responder::{pending, ResponseStream, ResponseStreamBuilder};
+use crate::responder::{pending, ResponseStream};
 use crate::utils::*;
 use axum::{
     extract::{
@@ -101,7 +101,7 @@ enum MatchStatus {
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
-    responder: Arc<dyn ResponseStreamBuilder + Send + Sync + 'static>,
+    responder: Arc<dyn ResponseStream + Send + Sync + 'static>,
     expected_calls: Arc<Times>,
     calls: Arc<AtomicU64>,
     name: Option<String>,
@@ -113,7 +113,7 @@ impl Mock {
         Self {
             matcher: vec![Arc::new(matcher)],
             expected_calls: Default::default(),
-            responder: Arc::new(pending),
+            responder: Arc::new(pending()),
             calls: Default::default(),
             name: None,
             priority: 5,
@@ -301,8 +301,7 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
     let (mut msg_tx, msg_rx) = mpsc::channel(8);
 
     let mut sender_task = if active_mocks.len() == 1 {
-        let responder = active_mocks[0].responder.create_response_stream();
-        let stream = responder.handle(msg_rx);
+        let stream = active_mocks[0].responder.handle(msg_rx);
         let handle = tokio::task::spawn(async move {
             stream
                 .map(|x| Ok(unconvert_message(x)))
