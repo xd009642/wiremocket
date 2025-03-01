@@ -1,5 +1,5 @@
 //! API slightly based off wiremock in that you start a server
-use crate::responder::{pending, ResponseStream};
+use crate::responder::{pending, ResponseStream, MapResponder, StreamResponse};
 use crate::utils::*;
 use axum::{
     extract::{
@@ -33,6 +33,7 @@ pub mod utils;
 pub mod prelude {
     pub use super::*;
     pub use crate::matchers::*;
+    pub use crate::responder::*;
 }
 
 type MockList = Arc<RwLock<Vec<Mock>>>;
@@ -142,6 +143,19 @@ impl Mock {
         self
     }
 
+    pub fn set_responder(mut self, responder: impl ResponseStream + Send + Sync + 'static) -> Self {
+        self.responder = Arc::new(responder);
+        self
+    }
+
+    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self 
+    where
+        F: Fn(Message) -> Message + Send + Sync + 'static
+    {
+        self.responder = Arc::new(MapResponder::new(map_fn));
+        self
+    }
+
     /// You can use this to verify the mock separately to the one you put into the server (if
     /// you've cloned it).
     pub fn verify(&self) -> bool {
@@ -231,7 +245,7 @@ async fn ws_handler(
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
             let mock_status = mock.check_request(&path, &headers, &params);
-
+            debug!("Mock status: {:?}", mock_status);
             if mock_status != MatchStatus::Mismatch {
                 active_mocks.push(index);
             }
@@ -290,6 +304,7 @@ fn unconvert_message(msg: Message) -> AxumMessage {
 }
 
 async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks: Vec<usize>) {
+    debug!("Active mock indexes are: {:?}", active_mocks);
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
     let mut active_mocks = active_mocks
@@ -314,8 +329,10 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                 .forward(sender)
                 .await
         });
+        debug!("Spawned responder task");
         Some(handle)
     } else {
+        debug!("Ambiguous matching, responder launch pending");
         None
     };
 
@@ -327,10 +344,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
             }
             debug!("Checking: {:?}", msg);
             if active_mocks.len() == 1 {
-                if matches!(
-                    active_mocks[0].check_message(&msg),
-                    MatchStatus::Full | MatchStatus::Partial
-                ) {
+                let status = active_mocks[0].check_message(&msg);
+                debug!("Active mock status: {:?}", status);
+                if matches!(status, MatchStatus::Full | MatchStatus::Partial) {
                     active_mocks[0].register_hit();
                 }
             } else {
@@ -380,6 +396,7 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                                         .forward(sender)
                                         .await
                                 });
+                                debug!("Spawned responder task");
                                 sender_task = Some(handle);
                             }
                             None => {
@@ -452,18 +469,21 @@ impl MockServer {
     }
 
     pub async fn verify(&self) {
+        assert!(self.mocks_pass().await);
+    }
+
+    pub async fn mocks_pass(&self) -> bool {
+        let mut res = true;
         for (index, mock) in self.mocks.read().await.iter().enumerate() {
-            println!("Checking {:?} {:?}", mock.expected_calls, mock.calls);
+            let mock_res = mock.verify();
             match &mock.name {
                 None => debug!("Checking mock[{}]", index),
                 Some(name) => debug!("Checking mock: {}", name),
             }
-            assert!(mock.verify())
+            debug!("Expected {:?} Actual {:?}: {}", mock.expected_calls, mock.calls, mock_res);
+            res &= mock_res;
         }
-    }
-
-    pub async fn mocks_pass(&self) -> bool {
-        self.mocks.read().await.iter().all(|x| x.verify())
+        res
     }
 }
 
