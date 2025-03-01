@@ -78,6 +78,12 @@ impl Default for TimesEnum {
     }
 }
 
+impl From<RangeFull> for Times {
+    fn from(r: RangeFull) -> Self {
+        Times(TimesEnum::Unbounded(r))
+    }
+}
+
 impl From<u64> for Times {
     fn from(x: u64) -> Self {
         Times(TimesEnum::Exact(x))

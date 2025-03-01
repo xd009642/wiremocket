@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -250,6 +250,38 @@ async fn combine_request_and_content_matchers() {
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
     sleep(Duration::from_millis(200)).await;
+
+    assert!(server.mocks_pass().await);
+}
+
+#[tokio::test]
+#[traced_test]
+async fn echo_response_test() {
+    let server = MockServer::start().await;
+
+    let responder = echo_response();
+
+    server
+        .register(
+            Mock::given(path("api/stream"))
+                .add_matcher(ValidJsonMatcher)
+                .set_responder(responder)
+                .expect(..),
+        )
+        .await;
+
+    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let val = json!({"hello": "world"});
+    let sent_message = Message::text(val.to_string());
+    stream.send(sent_message.clone()).await.unwrap();
+
+    let echoed = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(sent_message, echoed);
 
     assert!(server.mocks_pass().await);
 }

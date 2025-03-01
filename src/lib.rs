@@ -1,9 +1,9 @@
 //! API slightly based off wiremock in that you start a server
-use crate::responder::{pending, ResponseStream};
+use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
 use crate::utils::*;
 use axum::{
     extract::{
-        ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+        ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket, WebSocketUpgrade},
         Path, Query,
     },
     http::header::HeaderMap,
@@ -11,6 +11,7 @@ use axum::{
     routing::any,
     Extension, Router,
 };
+use futures::{sink::SinkExt, stream::StreamExt};
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::sync::{
@@ -18,8 +19,8 @@ use std::sync::{
     Arc,
 };
 use std::time::Instant;
-use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, Instrument};
+use tokio::sync::{broadcast, oneshot, RwLock};
+use tracing::{debug, error, Instrument};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
     Message,
@@ -32,6 +33,7 @@ pub mod utils;
 pub mod prelude {
     pub use super::*;
     pub use crate::matchers::*;
+    pub use crate::responder::*;
 }
 
 type MockList = Arc<RwLock<Vec<Mock>>>;
@@ -69,10 +71,34 @@ enum MatchStatus {
 ///
 /// With that in mind how do we select which mock is active when we have matchers that act on the
 /// initial request parameters and ones which act on the received messages? Our matching parameter
-/// is already more complicated being a `Option<bool>` to handle the case where there's no
-/// path/header matching and only body matching.
+/// is already more complicated to handle the case where there's no path/header matching and only
+/// body matching.
 ///
 /// ## The Plan
+///
+/// The plan is to move matching from a simple "yes/no/undetermined" to a 4 state system:
+///
+/// 1. Mismatch: One or more matchers is false
+/// 2. Potential: No matchers match but none have rejected the request
+/// 3. Partial: Some matchers match the request
+/// 4. Full: All matchers match the request - this is unambiguous
+///
+/// If we're in state 3 or 4 at the request point we'll pick the combination of most complete
+/// status and highest priority. Otherwise, the list of potential matchers is used for the request
+/// checking and each message we check and if we find a partial or higher we'll select the one with
+/// the highest priority.
+///
+/// Once a mock has been selected as the active mock, we'll then start passing the messages into
+/// the responder and the mock server will start sending messages back (if it's not a silent
+/// responder).
+///
+/// ## Drawbacks
+///
+/// I'm not currently keeping track of which matchers are triggered and which aren't. This is maybe
+/// a mistake and potentially I should be making sure that at some point during the request they've
+/// all matched. I'm also not tracking which levels matchesr match at:
+/// request/message/all-of-the-above. These two things may have to change in order to be actually
+/// useful but I'm kicking the can on that decision down the road a bit.
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
@@ -114,6 +140,19 @@ impl Mock {
     pub fn with_priority(mut self, priority: u8) -> Self {
         assert!(priority > 0, "priority must be strictly greater than 0!");
         self.priority = priority;
+        self
+    }
+
+    pub fn set_responder(mut self, responder: impl ResponseStream + Send + Sync + 'static) -> Self {
+        self.responder = Arc::new(responder);
+        self
+    }
+
+    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
+    where
+        F: Fn(Message) -> Message + Send + Sync + 'static,
+    {
+        self.responder = Arc::new(MapResponder::new(map_fn));
         self
     }
 
@@ -206,7 +245,7 @@ async fn ws_handler(
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
             let mock_status = mock.check_request(&path, &headers, &params);
-
+            debug!("Mock status: {:?}", mock_status);
             if mock_status != MatchStatus::Mismatch {
                 active_mocks.push(index);
             }
@@ -250,22 +289,64 @@ fn convert_message(msg: AxumMessage) -> Message {
     }
 }
 
+fn unconvert_message(msg: Message) -> AxumMessage {
+    match msg {
+        Message::Text(t) => AxumMessage::Text(t.as_str().into()),
+        Message::Binary(b) => AxumMessage::Binary(b.into()),
+        Message::Ping(p) => AxumMessage::Ping(p.into()),
+        Message::Pong(p) => AxumMessage::Pong(p.into()),
+        Message::Close(cf) => AxumMessage::Close(cf.map(|cf| AxumCloseFrame {
+            code: cf.code.into(),
+            reason: cf.reason.as_str().into(),
+        })),
+        Message::Frame(_) => unreachable!(),
+    }
+}
+
 async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks: Vec<usize>) {
+    debug!("Active mock indexes are: {:?}", active_mocks);
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
     let mut active_mocks = active_mocks
         .iter()
         .filter_map(|m| mocks.get(*m))
         .collect::<Vec<&Mock>>();
-    while let Some(msg) = socket.recv().await {
+
+    let (sender, mut receiver) = socket.split();
+    let (mut msg_tx, msg_rx) = broadcast::channel(128);
+
+    let mut receiver_holder = Some(msg_rx);
+    let mut sender_holder = Some(sender);
+
+    let mut sender_task = if active_mocks.len() == 1 {
+        let stream = active_mocks[0]
+            .responder
+            .handle(receiver_holder.take().unwrap());
+        let sender = sender_holder.take().unwrap();
+        let handle = tokio::task::spawn(async move {
+            stream
+                .map(|x| Ok(unconvert_message(x)))
+                .forward(sender)
+                .await
+        });
+        debug!("Spawned responder task");
+        Some(handle)
+    } else {
+        debug!("Ambiguous matching, responder launch pending");
+        None
+    };
+
+    while let Some(msg) = receiver.next().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
+            if let Err(e) = msg_tx.send(msg.clone()) {
+                error!("Dropping messages");
+            }
             debug!("Checking: {:?}", msg);
             if active_mocks.len() == 1 {
-                if matches!(
-                    active_mocks[0].check_message(&msg),
-                    MatchStatus::Full | MatchStatus::Partial
-                ) {
+                let status = active_mocks[0].check_message(&msg);
+                debug!("Active mock status: {:?}", status);
+                if matches!(status, MatchStatus::Full | MatchStatus::Partial) {
                     active_mocks[0].register_hit();
                 }
             } else {
@@ -305,6 +386,18 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                                 let active_mock = active_mocks.remove(index);
                                 active_mocks = vec![active_mock];
                                 mocks[index].register_hit();
+                                let stream = active_mocks[0]
+                                    .responder
+                                    .handle(receiver_holder.take().unwrap());
+                                let sender = sender_holder.take().unwrap();
+                                let handle = tokio::task::spawn(async move {
+                                    stream
+                                        .map(|x| Ok(unconvert_message(x)))
+                                        .forward(sender)
+                                        .await
+                                });
+                                debug!("Spawned responder task");
+                                sender_task = Some(handle);
                             }
                             None => {
                                 continue;
@@ -314,6 +407,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                 }
             }
         }
+    }
+    if let Some(hnd) = sender_task {
+        hnd.await.unwrap().unwrap();
     }
 }
 
@@ -373,18 +469,24 @@ impl MockServer {
     }
 
     pub async fn verify(&self) {
+        assert!(self.mocks_pass().await);
+    }
+
+    pub async fn mocks_pass(&self) -> bool {
+        let mut res = true;
         for (index, mock) in self.mocks.read().await.iter().enumerate() {
-            println!("Checking {:?} {:?}", mock.expected_calls, mock.calls);
+            let mock_res = mock.verify();
             match &mock.name {
                 None => debug!("Checking mock[{}]", index),
                 Some(name) => debug!("Checking mock: {}", name),
             }
-            assert!(mock.verify())
+            debug!(
+                "Expected {:?} Actual {:?}: {}",
+                mock.expected_calls, mock.calls, mock_res
+            );
+            res &= mock_res;
         }
-    }
-
-    pub async fn mocks_pass(&self) -> bool {
-        self.mocks.read().await.iter().all(|x| x.verify())
+        res
     }
 }
 
