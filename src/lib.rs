@@ -47,6 +47,20 @@ pub struct MockServer {
 /// Specify things like the routes this responds to i.e. `/api/ws-stream` query parameters, and
 /// behaviour it should exhibit in terms of source/sink messages. Also, will have matchers to allow
 /// you to do things like "make sure all messages are valid json"
+///
+/// Mock precedence.
+///
+/// Given a mock can generate a sequence of responses we have to adequately handle instances where
+/// multiple mocks match. Despite a temptation to allow multiple mocks to be active and merge
+/// multiple response streams this is complicated and will make it harder to specify tests that
+/// act deterministically where failures can be debugged.
+///
+/// With that in mind how do we select which mock is active when we have matchers that act on the
+/// initial request parameters and ones which act on the received messages? Our matching parameter
+/// is already more complicated being a `Option<bool>` to handle the case where there's no
+/// path/header matching and only body matching.
+///
+/// ## The Plan
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
@@ -54,6 +68,7 @@ pub struct Mock {
     expected_calls: Arc<Times>,
     calls: Arc<AtomicU64>,
     name: Option<String>,
+    priority: u8,
 }
 
 impl Mock {
@@ -64,8 +79,10 @@ impl Mock {
             responder: Arc::new(pending()),
             calls: Default::default(),
             name: None,
+            priority: 5,
         }
     }
+
     pub fn named<T: Into<String>>(mut self, mock_name: T) -> Self {
         self.name = Some(mock_name.into());
         self
@@ -78,6 +95,13 @@ impl Mock {
 
     pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
         self.matcher.push(Arc::new(matcher));
+        self
+    }
+
+    /// 1 is highest default is 5 (like wiremock)
+    pub fn with_priority(mut self, priority: u8) -> Self {
+        assert!(priority > 0, "priority must be strictly greater than 0!");
+        self.priority = priority;
         self
     }
 
