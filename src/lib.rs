@@ -19,8 +19,8 @@ use std::sync::{
     Arc,
 };
 use std::time::Instant;
-use tokio::sync::{mpsc, oneshot, RwLock};
-use tracing::{debug, Instrument};
+use tokio::sync::{broadcast, oneshot, RwLock};
+use tracing::{debug, error, Instrument};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
     Message,
@@ -297,16 +297,22 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
         .filter_map(|m| mocks.get(*m))
         .collect::<Vec<&Mock>>();
 
-    let (mut sender, mut receiver) = socket.split();
-    let (mut msg_tx, msg_rx) = mpsc::channel(8);
+    let (sender, mut receiver) = socket.split();
+    let (mut msg_tx, msg_rx) = broadcast::channel(128);
+
+    let mut receiver_holder = Some(msg_rx);
+    let mut sender_holder = Some(sender);
 
     let mut sender_task = if active_mocks.len() == 1 {
-        let stream = active_mocks[0].responder.handle(msg_rx);
+        let stream = active_mocks[0]
+            .responder
+            .handle(receiver_holder.take().unwrap());
+        let sender = sender_holder.take().unwrap();
         let handle = tokio::task::spawn(async move {
             stream
                 .map(|x| Ok(unconvert_message(x)))
                 .forward(sender)
-                .await;
+                .await
         });
         Some(handle)
     } else {
@@ -316,6 +322,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
     while let Some(msg) = receiver.next().await {
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
+            if let Err(e) = msg_tx.send(msg.clone()) {
+                error!("Dropping messages");
+            }
             debug!("Checking: {:?}", msg);
             if active_mocks.len() == 1 {
                 if matches!(
@@ -361,6 +370,17 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                                 let active_mock = active_mocks.remove(index);
                                 active_mocks = vec![active_mock];
                                 mocks[index].register_hit();
+                                let stream = active_mocks[0]
+                                    .responder
+                                    .handle(receiver_holder.take().unwrap());
+                                let sender = sender_holder.take().unwrap();
+                                let handle = tokio::task::spawn(async move {
+                                    stream
+                                        .map(|x| Ok(unconvert_message(x)))
+                                        .forward(sender)
+                                        .await
+                                });
+                                sender_task = Some(handle);
                             }
                             None => {
                                 continue;
@@ -370,6 +390,9 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                 }
             }
         }
+    }
+    if let Some(hnd) = sender_task {
+        hnd.await.unwrap().unwrap();
     }
 }
 

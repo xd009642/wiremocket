@@ -4,7 +4,7 @@ use futures::{
 };
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
 use tungstenite::Message;
@@ -26,7 +26,7 @@ use tungstenite::Message;
 // responder take the last client message as an output.
 
 pub trait ResponseStream {
-    fn handle(&self, input: mpsc::Receiver<Message>) -> BoxStream<'static, Message>;
+    fn handle(&self, input: broadcast::Receiver<Message>) -> BoxStream<'static, Message>;
 }
 
 impl<F, S> ResponseStream for F
@@ -34,7 +34,7 @@ where
     F: Fn() -> S,
     S: Stream<Item = Message> + Send + Sync + 'static,
 {
-    fn handle(&self, _: mpsc::Receiver<Message>) -> BoxStream<'static, Message> {
+    fn handle(&self, _: broadcast::Receiver<Message>) -> BoxStream<'static, Message> {
         self().boxed()
     }
 }
