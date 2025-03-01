@@ -253,7 +253,7 @@ fn convert_message(msg: AxumMessage) -> Message {
 async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks: Vec<usize>) {
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
-    let active_mocks = active_mocks
+    let mut active_mocks = active_mocks
         .iter()
         .filter_map(|m| mocks.get(*m))
         .collect::<Vec<&Mock>>();
@@ -269,12 +269,49 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                     active_mocks[0].register_hit();
                 }
             } else {
-                let statuses = active_mocks
-                    .iter()
-                    .map(|mock| mock.check_message(&msg))
-                    .collect::<Vec<_>>();
-                // We want to now filter this down to one element!
-                todo!()
+                let mut matched_mock = None;
+                let mut priorities = vec![];
+                for (index, mock) in active_mocks.iter().enumerate() {
+                    priorities.push(mock.priority);
+                    let mock_status = mock.check_message(&msg);
+                    if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
+                        if let Some((best_index, status, priority)) = &mut matched_mock {
+                            if mock_status > *status
+                                || (mock_status == *status && mock.priority < *priority)
+                            {
+                                *best_index = index;
+                                *status = mock_status;
+                                *priority = mock.priority
+                            }
+                        } else {
+                            matched_mock = Some((index, mock_status, mock.priority));
+                        }
+                    }
+                }
+                match matched_mock {
+                    Some((index, _, _)) => {
+                        let active_mock = active_mocks.remove(index);
+                        active_mocks = vec![active_mock];
+                        mocks[index].register_hit();
+                    }
+                    None => {
+                        let top_priority = priorities
+                            .iter()
+                            .enumerate()
+                            .min_by_key(|(index, priority)| *priority)
+                            .map(|(index, _)| index);
+                        match top_priority {
+                            Some(index) => {
+                                let active_mock = active_mocks.remove(index);
+                                active_mocks = vec![active_mock];
+                                mocks[index].register_hit();
+                            }
+                            None => {
+                                continue;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
