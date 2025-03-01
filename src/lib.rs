@@ -87,6 +87,52 @@ impl Mock {
         self.expected_calls
             .contains(self.calls.load(Ordering::SeqCst))
     }
+
+    pub fn check_request(
+        &self,
+        path: &str,
+        headers: &HeaderMap,
+        params: &HashMap<String, String>,
+    ) -> Option<bool> {
+        let values = self
+            .matcher
+            .iter()
+            .map(|x| x.request_match(path, headers, params))
+            .collect::<Vec<Option<bool>>>();
+
+        if values.iter().copied().all(can_consider) {
+            // TODO should this really be !values.contains(&None) ?
+            if values.contains(&Some(true)) {
+                self.calls.fetch_add(1, Ordering::Acquire);
+            }
+            if values.contains(&None) {
+                None
+            } else {
+                Some(true)
+            }
+        } else {
+            Some(false)
+        }
+    }
+
+    pub fn check_message(&self, message: &Message) -> Option<bool> {
+        let values = self
+            .matcher
+            .iter()
+            .map(|x| x.unary_match(&message))
+            .collect::<Vec<Option<bool>>>();
+
+        if values.iter().copied().all(can_consider) {
+            if values.contains(&Some(true)) {
+                self.calls.fetch_add(1, Ordering::Acquire);
+                Some(true)
+            } else {
+                None
+            }
+        } else {
+            Some(false)
+        }
+    }
 }
 
 pub struct RecordedConnection {
@@ -116,21 +162,17 @@ async fn ws_handler(
     mocks: Extension<MockList>,
 ) -> Response {
     let mut active_mocks = vec![];
+    let mut full_matches = vec![];
     {
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
-            let values = mock
-                .matcher
-                .iter()
-                .map(|x| x.request_match(&path, &headers, &params))
-                .collect::<Vec<Option<bool>>>();
-
-            if values.iter().copied().all(can_consider) {
-                if values.contains(&Some(true)) {
-                    mock.calls.fetch_add(1, Ordering::Acquire);
-                }
+            let mock_status = mock.check_request(&path, &headers, &params);
+            if mock_status != Some(false) {
                 active_mocks.push(index);
+                if mock_status == Some(true) {
+                    full_matches.push(index);
+                }
             }
         }
     }
@@ -163,17 +205,7 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, active_mocks: Vec
             let msg = convert_message(msg);
             debug!("Checking: {:?}", msg);
             for mock in &active_mocks {
-                let values = mock
-                    .matcher
-                    .iter()
-                    .map(|x| x.unary_match(&msg))
-                    .collect::<Vec<Option<bool>>>();
-
-                if values.iter().copied().all(can_consider) {
-                    if values.contains(&Some(true)) {
-                        mock.calls.fetch_add(1, Ordering::Acquire);
-                    }
-                }
+                mock.check_message(&msg);
             }
         }
     }
