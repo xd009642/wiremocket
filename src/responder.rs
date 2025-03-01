@@ -38,15 +38,13 @@ pub struct StreamResponse {
 }
 
 impl StreamResponse {
-    pub fn new<F, S>(ctor: F) -> Self 
+    pub fn new<F, S>(ctor: F) -> Self
     where
         F: Fn() -> S + Send + Sync + 'static,
         S: Stream<Item = Message> + Send + Sync + 'static,
     {
         let stream_ctor = Arc::new(move || ctor().boxed());
-        Self {
-            stream_ctor
-        }
+        Self { stream_ctor }
     }
 }
 
@@ -66,9 +64,7 @@ pub struct MapResponder {
 
 impl MapResponder {
     pub fn new<F: Fn(Message) -> Message + Send + Sync + 'static>(f: F) -> Self {
-        Self {
-            map: Arc::new(f)
-        }
+        Self { map: Arc::new(f) }
     }
 }
 

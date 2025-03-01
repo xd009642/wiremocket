@@ -1,5 +1,5 @@
 //! API slightly based off wiremock in that you start a server
-use crate::responder::{pending, ResponseStream, MapResponder, StreamResponse};
+use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
 use crate::utils::*;
 use axum::{
     extract::{
@@ -148,9 +148,9 @@ impl Mock {
         self
     }
 
-    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self 
+    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
     where
-        F: Fn(Message) -> Message + Send + Sync + 'static
+        F: Fn(Message) -> Message + Send + Sync + 'static,
     {
         self.responder = Arc::new(MapResponder::new(map_fn));
         self
@@ -480,7 +480,10 @@ impl MockServer {
                 None => debug!("Checking mock[{}]", index),
                 Some(name) => debug!("Checking mock: {}", name),
             }
-            debug!("Expected {:?} Actual {:?}: {}", mock.expected_calls, mock.calls, mock_res);
+            debug!(
+                "Expected {:?} Actual {:?}: {}",
+                mock.expected_calls, mock.calls, mock_res
+            );
             res &= mock_res;
         }
         res
