@@ -155,7 +155,6 @@ impl Mock {
             let contains_none = values.contains(&None);
 
             if contains_true {
-                self.calls.fetch_add(1, Ordering::Acquire);
                 if !contains_none {
                     MatchStatus::Full
                 } else {
@@ -167,6 +166,10 @@ impl Mock {
         } else {
             MatchStatus::Mismatch
         }
+    }
+
+    fn register_hit(&self) {
+        self.calls.fetch_add(1, Ordering::Acquire);
     }
 }
 
@@ -226,6 +229,8 @@ async fn ws_handler(
 
     if let Some((index, status, priority)) = matched_mock {
         active_mocks = vec![index];
+        let mocks = mocks.read().await.clone();
+        mocks[index].register_hit();
     }
 
     debug!("about to upgrade websocket connection");
@@ -245,7 +250,7 @@ fn convert_message(msg: AxumMessage) -> Message {
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, mocks: MockList, active_mocks: Vec<usize>) {
+async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks: Vec<usize>) {
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
     let active_mocks = active_mocks
@@ -256,8 +261,20 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, active_mocks: Vec
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
             debug!("Checking: {:?}", msg);
-            for mock in &active_mocks {
-                mock.check_message(&msg);
+            if active_mocks.len() == 1 {
+                if matches!(
+                    active_mocks[0].check_message(&msg),
+                    MatchStatus::Full | MatchStatus::Partial
+                ) {
+                    active_mocks[0].register_hit();
+                }
+            } else {
+                let statuses = active_mocks
+                    .iter()
+                    .map(|mock| mock.check_message(&msg))
+                    .collect::<Vec<_>>();
+                // We want to now filter this down to one element!
+                todo!()
             }
         }
     }
