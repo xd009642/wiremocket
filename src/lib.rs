@@ -44,6 +44,18 @@ pub struct MockServer {
     mocks: MockList,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+enum MatchStatus {
+    /// Every matcher returns Some(rue)
+    Full,
+    /// Some matchers return Some(true) some None
+    Partial,
+    /// All matchers return None
+    Potential,
+    /// One or more matchers return Some(false)
+    Mismatch,
+}
+
 /// Specify things like the routes this responds to i.e. `/api/ws-stream` query parameters, and
 /// behaviour it should exhibit in terms of source/sink messages. Also, will have matchers to allow
 /// you to do things like "make sure all messages are valid json"
@@ -112,49 +124,48 @@ impl Mock {
             .contains(self.calls.load(Ordering::SeqCst))
     }
 
-    pub fn check_request(
+    fn check_request(
         &self,
         path: &str,
         headers: &HeaderMap,
         params: &HashMap<String, String>,
-    ) -> Option<bool> {
+    ) -> MatchStatus {
         let values = self
             .matcher
             .iter()
             .map(|x| x.request_match(path, headers, params))
             .collect::<Vec<Option<bool>>>();
 
-        if values.iter().copied().all(can_consider) {
-            // TODO should this really be !values.contains(&None) ?
-            if values.contains(&Some(true)) {
-                self.calls.fetch_add(1, Ordering::Acquire);
-            }
-            if values.contains(&None) {
-                None
-            } else {
-                Some(true)
-            }
-        } else {
-            Some(false)
-        }
+        self.check_matcher_responses(&values)
     }
 
-    pub fn check_message(&self, message: &Message) -> Option<bool> {
+    fn check_message(&self, message: &Message) -> MatchStatus {
         let values = self
             .matcher
             .iter()
             .map(|x| x.unary_match(&message))
             .collect::<Vec<Option<bool>>>();
 
+        self.check_matcher_responses(&values)
+    }
+
+    fn check_matcher_responses(&self, values: &[Option<bool>]) -> MatchStatus {
         if values.iter().copied().all(can_consider) {
-            if values.contains(&Some(true)) {
+            let contains_true = values.contains(&Some(true));
+            let contains_none = values.contains(&None);
+
+            if contains_true {
                 self.calls.fetch_add(1, Ordering::Acquire);
-                Some(true)
+                if !contains_none {
+                    MatchStatus::Full
+                } else {
+                    MatchStatus::Partial
+                }
             } else {
-                None
+                MatchStatus::Potential
             }
         } else {
-            Some(false)
+            MatchStatus::Mismatch
         }
     }
 }
@@ -186,17 +197,13 @@ async fn ws_handler(
     mocks: Extension<MockList>,
 ) -> Response {
     let mut active_mocks = vec![];
-    let mut full_matches = vec![];
     {
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
             let mock_status = mock.check_request(&path, &headers, &params);
-            if mock_status != Some(false) {
+            if mock_status != MatchStatus::Mismatch {
                 active_mocks.push(index);
-                if mock_status == Some(true) {
-                    full_matches.push(index);
-                }
             }
         }
     }
