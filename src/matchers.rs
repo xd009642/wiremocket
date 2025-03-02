@@ -158,6 +158,17 @@ impl QueryParamIsMissingMatcher {
     }
 }
 
+pub struct CloseFrameReceivedMatcher;
+
+impl Match for CloseFrameReceivedMatcher {
+    fn unary_match(&self, msg: &Message) -> Option<bool> {
+        match msg {
+            Message::Close(_) => Some(true),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(feature = "serde_json")]
 pub use json::*;
 

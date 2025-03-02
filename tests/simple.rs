@@ -285,3 +285,44 @@ async fn echo_response_test() {
 
     assert!(server.mocks_pass().await);
 }
+
+#[tokio::test]
+#[traced_test]
+async fn ensure_close_frame_sent() {
+    let server = MockServer::start().await;
+
+    server
+        .register(
+            Mock::given(path("api/stream"))
+                .add_matcher(CloseFrameReceivedMatcher)
+                .expect(1..),
+        )
+        .await;
+
+    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let val = json!({"hello": "world"});
+    stream.send(Message::text(val.to_string())).await.unwrap();
+    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+
+    assert!(!server.mocks_pass().await);
+
+    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let val = json!({"hello": "world"});
+    stream.send(Message::text(val.to_string())).await.unwrap();
+    stream.send(Message::Close(None)).await.unwrap();
+    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
