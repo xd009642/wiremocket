@@ -61,4 +61,12 @@ impl MatchState {
     pub fn last_unchecked(&mut self) -> &Message {
         &self.stored_messages.last().unwrap().message
     }
+
+    pub fn get_message(&self, index: usize) -> Option<&Message> {
+        self.stored_messages.iter().find(|x| x.index == index).map(|x| &x.message)
+    }
+
+    pub fn len(&self) -> usize {
+        self.messages_received
+    }
 }

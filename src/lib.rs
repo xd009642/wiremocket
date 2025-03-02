@@ -34,6 +34,7 @@ pub mod utils;
 
 pub mod prelude {
     pub use super::*;
+    pub use crate::match_state::*;
     pub use crate::matchers::*;
     pub use crate::responder::*;
 }
