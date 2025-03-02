@@ -107,17 +107,21 @@ pub struct Mock {
     calls: Arc<AtomicU64>,
     name: Option<String>,
     priority: u8,
+    matcher_hit_mask: Arc<AtomicU64>,
+    pending_hit_mask: Arc<AtomicU64>,
 }
 
 impl Mock {
     pub fn given(matcher: impl Match + Send + Sync + 'static) -> Self {
         Self {
             matcher: vec![Arc::new(matcher)],
-            expected_calls: Default::default(),
             responder: Arc::new(pending()),
-            calls: Default::default(),
             name: None,
             priority: 5,
+            expected_calls: Default::default(),
+            calls: Default::default(),
+            matcher_hit_mask: Default::default(),
+            pending_hit_mask: Default::default(),
         }
     }
 
@@ -132,6 +136,7 @@ impl Mock {
     }
 
     pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
+        assert!(self.matcher.len() < 65, "Cannot have more than 65 matchers");
         self.matcher.push(Arc::new(matcher));
         self
     }
@@ -159,8 +164,11 @@ impl Mock {
     /// You can use this to verify the mock separately to the one you put into the server (if
     /// you've cloned it).
     pub fn verify(&self) -> bool {
-        self.expected_calls
-            .contains(self.calls.load(Ordering::SeqCst))
+        let hit_matches = self.matcher_hit_mask.load(Ordering::SeqCst).count_ones() as usize;
+        let calls = self.calls.load(Ordering::SeqCst);
+        debug!("{}/{} matchers hit over {} calls", hit_matches, self.matcher.len(), calls);
+        // If this mock doesn't need calling we don't need to check the hit matches
+        self.expected_calls.contains(calls) && (self.expected_calls.contains(0) || hit_matches == self.matcher.len())
     }
 
     fn check_request(
@@ -194,20 +202,31 @@ impl Mock {
             let contains_none = values.contains(&None);
 
             if contains_true {
+                let mut current_mask = 0u64;
+                for (i, _val) in values.iter().enumerate().filter(|(_, i)| **i == Some(true)) {
+                    current_mask |= 1 << i as u64;
+                }
+                self.pending_hit_mask.store(current_mask, Ordering::SeqCst);
+
                 if !contains_none {
                     MatchStatus::Full
                 } else {
                     MatchStatus::Partial
                 }
             } else {
+                self.pending_hit_mask.store(0, Ordering::SeqCst);
                 MatchStatus::Potential
             }
         } else {
+            self.pending_hit_mask.store(0, Ordering::SeqCst);
             MatchStatus::Mismatch
         }
     }
 
     fn register_hit(&self) {
+        // Reset the mask and get the current stored one
+        let pending_mask = self.pending_hit_mask.fetch_and(0, Ordering::Acquire);
+        self.matcher_hit_mask.fetch_or(pending_mask, Ordering::SeqCst);
         self.calls.fetch_add(1, Ordering::Acquire);
     }
 }
