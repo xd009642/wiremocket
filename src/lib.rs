@@ -166,9 +166,15 @@ impl Mock {
     pub fn verify(&self) -> bool {
         let hit_matches = self.matcher_hit_mask.load(Ordering::SeqCst).count_ones() as usize;
         let calls = self.calls.load(Ordering::SeqCst);
-        debug!("{}/{} matchers hit over {} calls", hit_matches, self.matcher.len(), calls);
+        debug!(
+            "{}/{} matchers hit over {} calls",
+            hit_matches,
+            self.matcher.len(),
+            calls
+        );
         // If this mock doesn't need calling we don't need to check the hit matches
-        self.expected_calls.contains(calls) && (self.expected_calls.contains(0) || hit_matches == self.matcher.len())
+        self.expected_calls.contains(calls)
+            && (self.expected_calls.contains(0) || hit_matches == self.matcher.len())
     }
 
     fn check_request(
@@ -226,7 +232,8 @@ impl Mock {
     fn register_hit(&self) {
         // Reset the mask and get the current stored one
         let pending_mask = self.pending_hit_mask.fetch_and(0, Ordering::Acquire);
-        self.matcher_hit_mask.fetch_or(pending_mask, Ordering::SeqCst);
+        self.matcher_hit_mask
+            .fetch_or(pending_mask, Ordering::SeqCst);
         self.calls.fetch_add(1, Ordering::Acquire);
     }
 }
