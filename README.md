@@ -14,6 +14,7 @@ wiremock issue look [here](https://github.com/LukeMathWalker/wiremock-rs/issues/
 * Checking of preconditions
 * Priority for Mocks
 * Some simple initial response handling
+* Close frame handling/checking
 
 ## What's Yet To Come?
 
@@ -21,4 +22,3 @@ wiremock issue look [here](https://github.com/LukeMathWalker/wiremock-rs/issues/
 * Similar quality of UX to wiremock
 * Figuring out if it lives separately or joins forces with wiremock-rs
 * More tests and checks
-* Close frame handling/checking
