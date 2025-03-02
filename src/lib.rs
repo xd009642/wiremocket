@@ -1,4 +1,5 @@
 //! API slightly based off wiremock in that you start a server
+use crate::match_state::*;
 use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
 use crate::utils::*;
 use axum::{
@@ -26,6 +27,7 @@ use tungstenite::{
     Message,
 };
 
+pub mod match_state;
 pub mod matchers;
 pub mod responder;
 pub mod utils;
@@ -192,11 +194,11 @@ impl Mock {
         self.check_matcher_responses(&values)
     }
 
-    fn check_message(&self, message: &Message) -> MatchStatus {
+    fn check_message(&self, state: &mut MatchState) -> MatchStatus {
         let values = self
             .matcher
             .iter()
-            .map(|x| x.unary_match(&message))
+            .map(|x| x.temporal_match(state))
             .collect::<Vec<Option<bool>>>();
 
         self.check_matcher_responses(&values)
@@ -362,15 +364,19 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
         None
     };
 
+    let mut state = MatchState::default();
+
     while let Some(msg) = receiver.next().await {
+        state.evict();
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
             if let Err(e) = msg_tx.send(msg.clone()) {
                 error!("Dropping messages");
             }
             debug!("Checking: {:?}", msg);
+            state.push_message(msg);
             if active_mocks.len() == 1 {
-                let status = active_mocks[0].check_message(&msg);
+                let status = active_mocks[0].check_message(&mut state);
                 debug!("Active mock status: {:?}", status);
                 if matches!(status, MatchStatus::Full | MatchStatus::Partial) {
                     active_mocks[0].register_hit();
@@ -380,7 +386,7 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                 let mut priorities = vec![];
                 for (index, mock) in active_mocks.iter().enumerate() {
                     priorities.push(mock.priority);
-                    let mock_status = mock.check_message(&msg);
+                    let mock_status = mock.check_message(&mut state);
                     if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
                         if let Some((best_index, status, priority)) = &mut matched_mock {
                             if mock_status > *status
@@ -535,6 +541,10 @@ pub trait Match {
 
     fn unary_match(&self, message: &Message) -> Option<bool> {
         None
+    }
+
+    fn temporal_match(&self, match_state: &mut MatchState) -> Option<bool> {
+        self.unary_match(match_state.last_unchecked())
     }
 }
 
