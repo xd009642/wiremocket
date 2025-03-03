@@ -61,7 +61,6 @@ async fn only_json_matcher() {
     stream.send(Message::Ping(vec![].into())).await.unwrap();
 
     std::mem::drop(stream);
-    // todo there should be a better way than this
 
     server.verify().await;
 }
