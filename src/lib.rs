@@ -1,7 +1,7 @@
-//! API slightly based off wiremock in that you start a server
+#![doc = include_str!("../README.md")]
 use crate::match_state::*;
 use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
-use crate::utils::*;
+pub use crate::utils::*;
 use axum::{
     extract::{
         ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket, WebSocketUpgrade},
@@ -12,7 +12,10 @@ use axum::{
     routing::any,
     Extension, Router,
 };
-use futures::{sink::SinkExt, stream::StreamExt};
+use futures::{
+    sink::SinkExt,
+    stream::{Stream, StreamExt},
+};
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::sync::{
@@ -32,6 +35,7 @@ pub mod matchers;
 pub mod responder;
 pub mod utils;
 
+/// Re-exports every part of the public API for ease of use.
 pub mod prelude {
     pub use super::*;
     pub use crate::match_state::*;
@@ -63,10 +67,10 @@ enum MatchStatus {
 }
 
 /// Specify things like the routes this responds to i.e. `/api/ws-stream` query parameters, and
-/// behaviour it should exhibit in terms of source/sink messages. Also, will have matchers to allow
+/// behaviour it should exhibit in terms of source/sink messages. Also has matchers to allow
 /// you to do things like "make sure all messages are valid json"
 ///
-/// Mock precedence.
+/// # Mock precedence.
 ///
 /// Given a mock can generate a sequence of responses we have to adequately handle instances where
 /// multiple mocks match. Despite a temptation to allow multiple mocks to be active and merge
@@ -78,9 +82,8 @@ enum MatchStatus {
 /// is already more complicated to handle the case where there's no path/header matching and only
 /// body matching.
 ///
-/// ## The Plan
-///
-/// The plan is to move matching from a simple "yes/no/undetermined" to a 4 state system:
+/// The way this is accomplished is to move matching from a simple "yes/no/undetermined" to a 4 state
+/// system:
 ///
 /// 1. Mismatch: One or more matchers is false
 /// 2. Potential: No matchers match but none have rejected the request
@@ -96,13 +99,9 @@ enum MatchStatus {
 /// the responder and the mock server will start sending messages back (if it's not a silent
 /// responder).
 ///
-/// ## Drawbacks
-///
-/// I'm not currently keeping track of which matchers are triggered and which aren't. This is maybe
-/// a mistake and potentially I should be making sure that at some point during the request they've
-/// all matched. I'm also not tracking which levels matchesr match at:
-/// request/message/all-of-the-above. These two things may have to change in order to be actually
-/// useful but I'm kicking the can on that decision down the road a bit.
+/// For the `Mock` to pass then all of the matchers added will have to have evaluated as
+/// `Some(true)` at least once. If any return `Some(false)` after the `Mock` has been selected then
+/// the call won't be registered but no other failure will occur.
 #[derive(Clone)]
 pub struct Mock {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
@@ -114,6 +113,9 @@ pub struct Mock {
 }
 
 impl Mock {
+    /// Start building a [`Mock`] specifying the first matcher.
+    ///
+    /// TODO this should return a builder actually.
     pub fn given(matcher: impl Match + Send + Sync + 'static) -> Self {
         Self {
             matcher: vec![Arc::new(matcher)],
@@ -125,11 +127,35 @@ impl Mock {
         }
     }
 
+    /// Assign a name to your mock.  
+    ///
+    /// The mock name will be used in error messages (e.g. if the mock expectation
+    /// is not satisfied) and debug logs to help you identify what failed.
     pub fn named<T: Into<String>>(mut self, mock_name: T) -> Self {
         self.name = Some(mock_name.into());
         self
     }
 
+    /// Set an expectation on the number of times this [`Mock`] should match in the current
+    /// test case.
+    ///
+    /// Unlike wiremock no expectations are checked when the server is shutting down. Although this
+    /// may change in the future.
+    ///
+    /// By default, no expectation is set for [`Mock`]s.
+    ///
+    /// ### When is this useful?
+    ///
+    /// `expect` can turn out handy when you'd like to verify that a certain side-effect has
+    /// (or has not!) taken place.
+    ///
+    /// For example:
+    /// - check that a 3rd party notification API (e.g. email service) is called when an event
+    ///   in your application is supposed to trigger a notification;
+    /// - check that a 3rd party API is NOT called when the response of a call is expected
+    ///   to be retrieved from a cache (`.expect(0)`).
+    ///
+    /// This technique is also called [spying](https://martinfowler.com/bliki/TestDouble.html).
     pub fn expect(mut self, times: impl Into<Times>) -> Self {
         self.expected_calls = Arc::new(times.into());
         self
@@ -141,18 +167,37 @@ impl Mock {
         self
     }
 
-    /// 1 is highest default is 5 (like wiremock)
+    /// Specify a priority for this [`Mock`].
+    /// Use this when you mount many [`Mock`] in a [`MockServer`]
+    /// and those mocks have interlaced request matching conditions
+    /// e.g. `mock A` accepts path `/abcd` and `mock B` a path regex `[a-z]{4}`
+    /// It is recommended to set the highest priority (1) for mocks with exact conditions (`mock A` in this case)
+    /// `1` is the highest priority, `255` the lowest, default to `5`
+    /// If two mocks have the same priority, priority is defined by insertion order (first one mounted has precedence over the others).
     pub fn with_priority(mut self, priority: u8) -> Self {
         assert!(priority > 0, "priority must be strictly greater than 0!");
         self.priority = priority;
         self
     }
 
+    /// Sets a responder for the `Mock`. If you have a simpler function you can use
+    /// `Mock::one_to_one_response` or `Mock::response_stream` to determine how the `Mock` responds.
     pub fn set_responder(mut self, responder: impl ResponseStream + Send + Sync + 'static) -> Self {
         self.responder = Arc::new(responder);
         self
     }
 
+    /// This `Mock` will respond with a stream of `Messages` independent of the inputs received.
+    pub fn response_stream<F, S>(mut self, ctor: F) -> Self
+    where
+        F: Fn() -> S + Send + Sync + 'static,
+        S: Stream<Item = Message> + Send + Sync + 'static,
+    {
+        self.responder = Arc::new(StreamResponse::new(ctor));
+        self
+    }
+
+    /// For each `Message` from the client respond with a `Message`.
     pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
     where
         F: Fn(Message) -> Message + Send + Sync + 'static,
@@ -392,7 +437,7 @@ async fn handle_socket(
         None
     };
 
-    let mut state = MatchState::default();
+    let mut state = MatchState::new();
 
     while let Some(msg) = receiver.next().await {
         state.evict();
@@ -554,10 +599,14 @@ impl MockServer {
         todo!("Record some connection info");
     }
 
+    /// Asserts on [`MockServer::mocks_pass`]
     pub async fn verify(&self) {
         assert!(self.mocks_pass().await);
     }
 
+    /// Returns true if all mocks pass. This method will wait for all on-going websocket
+    /// connections to close before responding as match status is updated at the end of a request.
+    /// If a connection is open then this method can deadlock.
     pub async fn mocks_pass(&self) -> bool {
         let mut active_requests = self.active_requests.lock().await;
         // If there's no more senders then in
@@ -594,7 +643,77 @@ impl Drop for MockServer {
     }
 }
 
+/// Anything that implements `Match` can be used to constrain when a [`Mock`] is activated.
+///
+/// This type is more complicated than the `Match` trait in wiremock because of the differences in
+/// websocket connections and the data interchanged. As such there are 3 domains where we can match
+/// a request:
+///
+/// 1. At the initial request - headers, URL, query parameters
+/// 2. A single websocket message in isolation
+/// 3. Behaviour over the stream of messages
+///
+/// Point 2. is actually a subset of 3. but it is much simpler hence it's own method. Because a
+/// `Match` may not be applied in all 3 domains there is the ability for it to return `None`. For
+/// example, if we have a [`CloseFrameReceivedMatcher`] this only checks if a close frame is
+/// received, every other component of the request is irrelevant and when checking them will return
+/// a `None`. Likewise the `PatchExactMatcher` can only return `Some(true)` when we look at the
+/// initial request parameters. Once the body is being received it's irrelevant.
+///
+/// # Temporal Matching
+///
+/// Here we care about the state of the stream of messages. When `Match::temporal_match` is called
+/// it will be after a message is received. [`MatchState::last`] will return the most recent
+/// message.
+///
+/// To avoid storing all messages if your `Match` implementation will require access to a message
+/// in future passes use [`MatchState::keep_message`] to retain the message in the buffer. Likewise
+/// when your `Match` doesn't want the message anymore call [`MatchStatus::forget_message`].
+///
+/// One thing to note is because unary message matching is a special case of temporal message
+/// handling the default temporal matcher calls the unary method with [`MatchState::last`] as the
+/// argument.
+///
+/// ## Note
+///
+/// If you call [`MatchStatus::forget_message`] twice for the same index in the same `Match`
+/// instance during a connection you may evict a message which another `Match` required for
+/// temporal checking. Take care you don't over-forget messages to avoid tests failing erroneous
+/// (or worse passing eroneously).
+///
+/// This is done in part to allow for reduced resource usage (and ease of implementation).
+///
+/// # Implementing
+///
+/// [`Match::unary_match`] isn't called directly by wiremocket which instead relies on the default
+/// implementation of [`Match::temporal_match`]. It is expected that a `Match` is implemented over
+/// 1 of the listed domains.
+///
+/// If a `Match` returns `Some(true)` this is stored as part of the request state and failure for
+/// every `Match` to return this during a request results in the verify check failing. Therefore
+/// having a `Match` which checks multiple things that are independent of each other is likely to
+/// lead to incorrect test results.
+///
+/// Simple implementation example on making a `Match` which checks if a `Ping` is received during
+/// the session:
+///
+/// ```rust
+/// use wiremocket::Match;
+/// use tungstenite::Message;
+///
+/// pub struct PingOccursMatcher;
+///
+/// impl Match for PingOccursMatcher {
+///     fn unary_match(&self, message: &Message) -> Option<bool> {
+///         match message {
+///             Message::Ping(_) => Some(true),
+///             _ => None,
+///         }
+///     }
+/// }
+/// ```
 pub trait Match {
+    /// Check parameters available at connection initiation.
     fn request_match(
         &self,
         path: &str,
@@ -604,12 +723,14 @@ pub trait Match {
         None
     }
 
+    /// Check single websocket messages in isolation.
     fn unary_match(&self, message: &Message) -> Option<bool> {
         None
     }
 
+    /// Check properties over multiple messages.
     fn temporal_match(&self, match_state: &mut MatchState) -> Option<bool> {
-        self.unary_match(match_state.last_unchecked())
+        self.unary_match(match_state.last())
     }
 }
 

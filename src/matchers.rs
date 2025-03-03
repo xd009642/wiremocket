@@ -1,11 +1,23 @@
+//! A collection of different matching strategies provided out-of-the-box by `wiremocket`.
+//!
+//! If the set of matchers provided out-of-the-box is not enough for your specific testing needs
+//! you can implement your own thanks to the [`Match`] trait.
+//!
+//! Furthermore, `Fn` closures that take an immutable [`tungstenite::Message`] reference as input
+//! and return an `Option<bool>` as input automatically implement [`Match`] and can be used where
+//! a matcher is expected for unary stream matching.
+//!
+//! Check [`Match`]'s documentation for examples.
 use crate::Match;
 use axum::http::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use tungstenite::Message;
 
+/// Match exactly the path of a request.
 pub struct PathExactMatcher(String);
 
+/// Shorthand for [`PathExactMatcher::new`].
 pub fn path<T>(path: T) -> PathExactMatcher
 where
     T: Into<String>,
@@ -14,6 +26,7 @@ where
 }
 
 impl PathExactMatcher {
+    /// Creates a new `PathExactMatcher`.
     pub fn new<T: Into<String>>(path: T) -> Self {
         Self(path.into())
     }
@@ -30,6 +43,7 @@ impl Match for PathExactMatcher {
     }
 }
 
+/// Match exactly the header of a request.
 pub struct HeaderExactMatcher(HeaderName, Vec<HeaderValue>);
 
 impl Match for HeaderExactMatcher {
@@ -45,6 +59,8 @@ impl Match for HeaderExactMatcher {
 }
 
 impl HeaderExactMatcher {
+    /// Create a new `HeaderExactMatcher`. Multiple `values` are provided for instances when the
+    /// header should be present more than once.
     pub fn new<Name, Value>(name: Name, mut values: Vec<Value>) -> Self
     where
         Name: TryInto<HeaderName>,
@@ -61,6 +77,8 @@ impl HeaderExactMatcher {
     }
 }
 
+/// Match exactly the header name of a request. It checks that the header is present but does not
+/// validate the value.
 pub struct HeaderExistsMatcher(HeaderName);
 
 impl Match for HeaderExistsMatcher {
@@ -75,6 +93,7 @@ impl Match for HeaderExistsMatcher {
 }
 
 impl HeaderExistsMatcher {
+    /// Creates a new `HeaderExistsMatcher`.
     pub fn new<Name>(name: Name) -> Self
     where
         Name: TryInto<HeaderName>,
@@ -85,6 +104,7 @@ impl HeaderExistsMatcher {
     }
 }
 
+/// Match exactly the query parameter of a request.
 pub struct QueryParamExactMatcher {
     name: String,
     value: String,
@@ -102,6 +122,7 @@ impl Match for QueryParamExactMatcher {
 }
 
 impl QueryParamExactMatcher {
+    /// Create a new `QueryParamExactMatcher`.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -110,6 +131,7 @@ impl QueryParamExactMatcher {
     }
 }
 
+/// Match when a query parameter contains the specified value as a substring.
 pub struct QueryParamContainsMatcher {
     name: String,
     value: String,
@@ -131,6 +153,7 @@ impl Match for QueryParamContainsMatcher {
 }
 
 impl QueryParamContainsMatcher {
+    /// Create a new `QueryParamContainsMatcher`
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -139,6 +162,7 @@ impl QueryParamContainsMatcher {
     }
 }
 
+/// Only match requests that do not contain a specified query parameter.
 pub struct QueryParamIsMissingMatcher(String);
 
 impl Match for QueryParamIsMissingMatcher {
@@ -153,11 +177,13 @@ impl Match for QueryParamIsMissingMatcher {
 }
 
 impl QueryParamIsMissingMatcher {
+    /// Create a new `QueryParamIsMissingMatcher`.
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 }
 
+/// Match requests where the session is terminated with a `CloseFrame` from the client.
 pub struct CloseFrameReceivedMatcher;
 
 impl Match for CloseFrameReceivedMatcher {
@@ -172,11 +198,14 @@ impl Match for CloseFrameReceivedMatcher {
 #[cfg(feature = "serde_json")]
 pub use json::*;
 
+/// Optional matchers that require the `serde_json` feature to be active.
 #[cfg(feature = "serde_json")]
 pub mod json {
     use super::*;
     use serde_json::Value;
 
+    /// Match that every `Message::Binary` and `Message::Text` received by the server is valid
+    /// json.
     pub struct ValidJsonMatcher;
 
     impl Match for ValidJsonMatcher {

@@ -6,7 +6,7 @@ use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
-use webmocket::prelude::*;
+use wiremocket::prelude::*;
 
 struct BinaryStreamMatcher;
 
@@ -14,7 +14,7 @@ impl Match for BinaryStreamMatcher {
     fn temporal_match(&self, match_state: &mut MatchState) -> Option<bool> {
         let json = ValidJsonMatcher;
         let len = match_state.len();
-        let last = match_state.last_unchecked();
+        let last = match_state.last();
         if len == 1 && json.unary_match(last).unwrap() {
             match_state.keep_message(0);
             Some(true)

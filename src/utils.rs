@@ -1,9 +1,36 @@
+//! Utility functions and types used by wiremocket.
 use std::ops::{
     Range, RangeBounds, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
 
 // All code below is adapted from https://docs.rs/wiremock/latest/wiremock/struct.Times.html
 
+/// Specify how many times we expect a [`Mock`] to match via [`expect`].
+/// It is used to set expectations on the usage of a [`Mock`] in a test case.
+///
+/// You can either specify an exact value, e.g.
+/// ```rust
+/// use wiremocket::Times;
+///
+/// let times: Times = 10.into();
+/// ```
+/// or a range
+/// ```rust
+/// use wiremocket::Times;
+///
+/// // Between 10 and 15 (not included) times
+/// let times: Times = (10..15).into();
+/// // Between 10 and 15 (included) times
+/// let times: Times = (10..=15).into();
+/// // At least 10 times
+/// let times: Times = (10..).into();
+/// // Strictly less than 15 times
+/// let times: Times = (..15).into();
+/// // Strictly less than 16 times
+/// let times: Times = (..=15).into();
+/// ```
+///
+/// [`expect`]: Mock::expect
 #[derive(Clone, Debug, Default)]
 pub struct Times(TimesEnum);
 

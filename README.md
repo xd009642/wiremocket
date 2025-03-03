@@ -1,24 +1,10 @@
-# webmocket
+# wiremocket
 
-🚧 **This crate is currently very WIP** 🚧
-
-'webmocket' provides mocking so you can perform black-box testing of Rust
+'wiremocket' provides mocking so you can perform black-box testing of Rust
 applications that interact with websocket APIs. It's heavily inspired by
 [wiremock-rs](https://github.com/LukeMathWalker/wiremock-rs/) and is an
 experimentation of how it could look like in a similar API. For a relevant
 wiremock issue look [here](https://github.com/LukeMathWalker/wiremock-rs/issues/113).
 
-## What's implemented So Far?
-
-* Simple request checking of initial parameters and message stream (headers, paths and websocket messages)
-* Checking of preconditions
-* Priority for Mocks
-* Some simple initial response handling
-* Close frame handling/checking
-
-## What's Yet To Come?
-
-* Better verification reports
-* Similar quality of UX to wiremock
-* Figuring out if it lives separately or joins forces with wiremock-rs
-* More tests and checks
+There's still some work to do, but this is very nearly at an initial
+version!

@@ -6,7 +6,7 @@ use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
-use webmocket::prelude::*;
+use wiremocket::prelude::*;
 
 #[tokio::test]
 #[traced_test]
