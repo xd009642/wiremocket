@@ -1,10 +1,7 @@
-use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
-use std::time::Duration;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
-use tungstenite::client::IntoClientRequest;
 use tungstenite::Message;
 use wiremocket::prelude::*;
 

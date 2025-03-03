@@ -22,7 +22,6 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use std::time::Instant;
 use tokio::sync::{broadcast, oneshot, watch, Mutex, RwLock};
 use tracing::{debug, error, Instrument};
 use tungstenite::{
@@ -397,9 +396,9 @@ fn unconvert_message(msg: Message) -> AxumMessage {
 }
 
 async fn handle_socket(
-    mut socket: WebSocket,
+    socket: WebSocket,
     mocks: MockList,
-    mut active_mocks: Vec<usize>,
+    active_mocks: Vec<usize>,
     mut mask: u64,
 ) {
     debug!("Active mock indexes are: {:?}", active_mocks);
@@ -414,7 +413,7 @@ async fn handle_socket(
         .collect::<Vec<&Mock>>();
 
     let (sender, mut receiver) = socket.split();
-    let (mut msg_tx, msg_rx) = broadcast::channel(128);
+    let (msg_tx, msg_rx) = broadcast::channel(128);
 
     let mut receiver_holder = Some(msg_rx);
     let mut sender_holder = Some(sender);

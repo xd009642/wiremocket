@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
-use std::time::Duration;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::client::IntoClientRequest;
@@ -31,7 +30,7 @@ async fn no_matches() {
 
     server.register(other_mock).await;
 
-    let (mut stream, response) = connect_async(server.uri()).await.unwrap();
+    let (stream, response) = connect_async(server.uri()).await.unwrap();
 
     std::mem::drop(stream);
 
@@ -211,7 +210,7 @@ async fn header_doesnt_match() {
 async fn query_param_matchers() {
     let server = MockServer::start().await;
 
-    let mut mock = Mock::given(QueryParamExactMatcher::new("hello", "world"))
+    let mock = Mock::given(QueryParamExactMatcher::new("hello", "world"))
         .add_matcher(QueryParamContainsMatcher::new("foo", "ar"))
         .add_matcher(QueryParamIsMissingMatcher::new("not_here"));
 

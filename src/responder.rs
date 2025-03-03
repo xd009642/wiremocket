@@ -4,12 +4,8 @@ use futures::{
     stream::{self, BoxStream},
     Stream, StreamExt,
 };
-use std::future::ready;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::RecvError;
-use tokio::time::sleep;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::warn;
 use tungstenite::Message;
@@ -129,7 +125,7 @@ impl ResponseStream for MapResponder {
     fn handle(&self, input: broadcast::Receiver<Message>) -> BoxStream<'static, Message> {
         let map_fn = Arc::clone(&self.map);
 
-        let mut input = BroadcastStream::new(input);
+        let input = BroadcastStream::new(input);
 
         let stream = stream! {
             for await value in input {
