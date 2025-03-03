@@ -1,4 +1,5 @@
 debug/
+mutants.out/
 target/
 Cargo.lock
 **/*.rs.bk

@@ -63,7 +63,10 @@ impl MatchState {
     }
 
     pub fn get_message(&self, index: usize) -> Option<&Message> {
-        self.stored_messages.iter().find(|x| x.index == index).map(|x| &x.message)
+        self.stored_messages
+            .iter()
+            .find(|x| x.index == index)
+            .map(|x| &x.message)
     }
 
     pub fn len(&self) -> usize {

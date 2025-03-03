@@ -34,6 +34,9 @@ async fn no_matches() {
 
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
+
     server.verify().await;
     assert!(logs_contain("mock[0]"));
     assert!(logs_contain("mock: path"));
@@ -60,7 +63,8 @@ async fn only_json_matcher() {
     // Make sure ping doesn't change anything
     stream.send(Message::Ping(vec![].into())).await.unwrap();
 
-    // TODO there should be a better way than this
+    std::mem::drop(stream);
+    // todo there should be a better way than this
     sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
@@ -84,7 +88,8 @@ async fn deny_invalid_json() {
     stream.send(Message::Ping(val.into())).await.unwrap();
 
     // TODO there should be a better way than this
-    sleep(Duration::from_millis(200)).await;
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -105,7 +110,9 @@ async fn match_path() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -129,7 +136,9 @@ async fn header_exists() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -148,7 +157,9 @@ async fn header_doesnt_exist() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -176,6 +187,9 @@ async fn header_exactly_matches() {
 
     let (stream, response) = connect_async(request).await.unwrap();
 
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
+
     server.verify().await;
 }
 
@@ -196,6 +210,9 @@ async fn header_doesnt_match() {
 
     let (stream, response) = connect_async(request).await.unwrap();
 
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
+
     server.verify().await;
 }
 
@@ -214,6 +231,9 @@ async fn query_param_matchers() {
     let uri = format!("{}/what?hello=world&foo=bar", server.uri());
 
     let (stream, response) = connect_async(uri).await.unwrap();
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -238,7 +258,7 @@ async fn combine_request_and_content_matchers() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(100)).await;
 
     assert!(!server.mocks_pass().await);
 
@@ -249,7 +269,9 @@ async fn combine_request_and_content_matchers() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }
@@ -266,7 +288,7 @@ async fn echo_response_test() {
             Mock::given(path("api/stream"))
                 .add_matcher(ValidJsonMatcher)
                 .set_responder(responder)
-                .expect(..),
+                .expect(1..),
         )
         .await;
 
@@ -282,6 +304,9 @@ async fn echo_response_test() {
     let echoed = stream.next().await.unwrap().unwrap();
 
     assert_eq!(sent_message, echoed);
+
+    std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }
@@ -306,7 +331,7 @@ async fn ensure_close_frame_sent() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(100)).await;
 
     std::mem::drop(stream);
 
@@ -320,9 +345,9 @@ async fn ensure_close_frame_sent() {
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
     stream.send(Message::Close(None)).await.unwrap();
-    sleep(Duration::from_millis(200)).await;
 
     std::mem::drop(stream);
+    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }

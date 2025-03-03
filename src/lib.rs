@@ -110,8 +110,6 @@ pub struct Mock {
     calls: Arc<AtomicU64>,
     name: Option<String>,
     priority: u8,
-    matcher_hit_mask: Arc<AtomicU64>,
-    pending_hit_mask: Arc<AtomicU64>,
 }
 
 impl Mock {
@@ -123,8 +121,6 @@ impl Mock {
             priority: 5,
             expected_calls: Default::default(),
             calls: Default::default(),
-            matcher_hit_mask: Default::default(),
-            pending_hit_mask: Default::default(),
         }
     }
 
@@ -167,17 +163,10 @@ impl Mock {
     /// You can use this to verify the mock separately to the one you put into the server (if
     /// you've cloned it).
     pub fn verify(&self) -> bool {
-        let hit_matches = self.matcher_hit_mask.load(Ordering::SeqCst).count_ones() as usize;
         let calls = self.calls.load(Ordering::SeqCst);
-        debug!(
-            "{}/{} matchers hit over {} calls",
-            hit_matches,
-            self.matcher.len(),
-            calls
-        );
+        debug!("mock hit over {} calls", calls);
         // If this mock doesn't need calling we don't need to check the hit matches
         self.expected_calls.contains(calls)
-            && (self.expected_calls.contains(0) || hit_matches == self.matcher.len())
     }
 
     fn check_request(
@@ -185,7 +174,7 @@ impl Mock {
         path: &str,
         headers: &HeaderMap,
         params: &HashMap<String, String>,
-    ) -> MatchStatus {
+    ) -> (MatchStatus, u64) {
         let values = self
             .matcher
             .iter()
@@ -195,7 +184,7 @@ impl Mock {
         self.check_matcher_responses(&values)
     }
 
-    fn check_message(&self, state: &mut MatchState) -> MatchStatus {
+    fn check_message(&self, state: &mut MatchState) -> (MatchStatus, u64) {
         let values = self
             .matcher
             .iter()
@@ -205,7 +194,7 @@ impl Mock {
         self.check_matcher_responses(&values)
     }
 
-    fn check_matcher_responses(&self, values: &[Option<bool>]) -> MatchStatus {
+    fn check_matcher_responses(&self, values: &[Option<bool>]) -> (MatchStatus, u64) {
         if values.iter().copied().all(can_consider) {
             let contains_true = values.contains(&Some(true));
             let contains_none = values.contains(&None);
@@ -215,28 +204,25 @@ impl Mock {
                 for (i, _val) in values.iter().enumerate().filter(|(_, i)| **i == Some(true)) {
                     current_mask |= 1 << i as u64;
                 }
-                self.pending_hit_mask.store(current_mask, Ordering::SeqCst);
 
                 if !contains_none {
-                    MatchStatus::Full
+                    (MatchStatus::Full, current_mask)
                 } else {
-                    MatchStatus::Partial
+                    (MatchStatus::Partial, current_mask)
                 }
             } else {
-                self.pending_hit_mask.store(0, Ordering::SeqCst);
-                MatchStatus::Potential
+                (MatchStatus::Potential, 0)
             }
         } else {
-            self.pending_hit_mask.store(0, Ordering::SeqCst);
-            MatchStatus::Mismatch
+            (MatchStatus::Mismatch, 0)
         }
     }
 
+    fn expected_mask(&self) -> u64 {
+        u64::MAX >> (64 - self.matcher.len() as u64)
+    }
+
     fn register_hit(&self) {
-        // Reset the mask and get the current stored one
-        let pending_mask = self.pending_hit_mask.fetch_and(0, Ordering::Acquire);
-        self.matcher_hit_mask
-            .fetch_or(pending_mask, Ordering::SeqCst);
         self.calls.fetch_add(1, Ordering::Acquire);
     }
 }
@@ -260,6 +246,13 @@ fn can_consider(match_res: Option<bool>) -> bool {
     matches!(match_res, Some(true) | None)
 }
 
+struct ActiveMockCandidate {
+    index: usize,
+    mock_status: MatchStatus,
+    priority: u8,
+    mask: u64,
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Path(path): Path<String>,
@@ -268,41 +261,50 @@ async fn ws_handler(
     mocks: Extension<MockList>,
 ) -> Response {
     let mut active_mocks = vec![];
-    let mut matched_mock = None;
+    let mut matched_mock: Option<ActiveMockCandidate> = None;
+    let mut current_mask = 0;
     {
         debug!("checking request level matches");
         let mocks = mocks.read().await.clone();
         for (index, mock) in mocks.iter().enumerate() {
-            let mock_status = mock.check_request(&path, &headers, &params);
+            let (mock_status, mask) = mock.check_request(&path, &headers, &params);
             debug!("Mock status: {:?}", mock_status);
             if mock_status != MatchStatus::Mismatch {
                 active_mocks.push(index);
             }
 
             if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
-                if let Some((best_index, status, priority)) = &mut matched_mock {
-                    if mock_status > *status
-                        || (mock_status == *status && mock.priority < *priority)
+                if let Some(best_match) = &mut matched_mock {
+                    if mock_status > best_match.mock_status
+                        || (mock_status == best_match.mock_status
+                            && mock.priority < best_match.priority)
                     {
-                        *best_index = index;
-                        *status = mock_status;
-                        *priority = mock.priority
+                        best_match.index = index;
+                        best_match.mock_status = mock_status;
+                        best_match.priority = mock.priority;
+                        best_match.mask = mask;
                     }
                 } else {
-                    matched_mock = Some((index, mock_status, mock.priority));
+                    matched_mock = Some(ActiveMockCandidate {
+                        index,
+                        mock_status,
+                        priority: mock.priority,
+                        mask,
+                    });
                 }
             }
         }
     }
 
-    if let Some((index, status, priority)) = matched_mock {
-        active_mocks = vec![index];
-        let mocks = mocks.read().await.clone();
-        mocks[index].register_hit();
+    if let Some(active) = matched_mock {
+        active_mocks = vec![active.index];
+        current_mask = active.mask;
     }
 
     debug!("about to upgrade websocket connection");
-    ws.on_upgrade(|socket| async move { handle_socket(socket, mocks.0, active_mocks).await })
+    ws.on_upgrade(move |socket| async move {
+        handle_socket(socket, mocks.0, active_mocks, current_mask).await
+    })
 }
 
 fn convert_message(msg: AxumMessage) -> Message {
@@ -332,8 +334,16 @@ fn unconvert_message(msg: Message) -> AxumMessage {
     }
 }
 
-async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks: Vec<usize>) {
+async fn handle_socket(
+    mut socket: WebSocket,
+    mocks: MockList,
+    mut active_mocks: Vec<usize>,
+    mut mask: u64,
+) {
     debug!("Active mock indexes are: {:?}", active_mocks);
+
+    let mut no_mismatch = true;
+
     // Clone the mocks present when the connection comes in
     let mocks: Vec<Mock> = mocks.read().await.clone();
     let mut active_mocks = active_mocks
@@ -377,48 +387,65 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
             debug!("Checking: {:?}", msg);
             state.push_message(msg);
             if active_mocks.len() == 1 {
-                let status = active_mocks[0].check_message(&mut state);
+                let (status, message_mask) = active_mocks[0].check_message(&mut state);
+                mask |= message_mask;
                 debug!("Active mock status: {:?}", status);
-                if matches!(status, MatchStatus::Full | MatchStatus::Partial) {
-                    active_mocks[0].register_hit();
+
+                if status == MatchStatus::Mismatch {
+                    no_mismatch = false;
                 }
             } else {
-                let mut matched_mock = None;
+                let mut matched_mock: Option<ActiveMockCandidate> = None;
                 let mut priorities = vec![];
+                let mut masks = vec![];
                 for (index, mock) in active_mocks.iter().enumerate() {
-                    priorities.push(mock.priority);
-                    let mock_status = mock.check_message(&mut state);
+                    let (mock_status, mask_hits) = mock.check_message(&mut state);
+                    if mock_status != MatchStatus::Mismatch {
+                        priorities.push(mock.priority);
+                    } else {
+                        // TODO this will break if the user actually uses priority 255..
+                        priorities.push(u8::MAX);
+                    }
+                    masks.push(mask_hits);
                     if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
-                        if let Some((best_index, status, priority)) = &mut matched_mock {
-                            if mock_status > *status
-                                || (mock_status == *status && mock.priority < *priority)
+                        if let Some(best_match) = &mut matched_mock {
+                            if mock_status > best_match.mock_status
+                                || (mock_status == best_match.mock_status
+                                    && mock.priority < best_match.priority)
                             {
-                                *best_index = index;
-                                *status = mock_status;
-                                *priority = mock.priority
+                                best_match.index = index;
+                                best_match.mock_status = mock_status;
+                                best_match.priority = mock.priority;
+                                best_match.mask = mask_hits;
                             }
                         } else {
-                            matched_mock = Some((index, mock_status, mock.priority));
+                            matched_mock = Some(ActiveMockCandidate {
+                                index,
+                                mock_status,
+                                priority: mock.priority,
+                                mask: mask_hits,
+                            });
                         }
                     }
                 }
                 match matched_mock {
-                    Some((index, _, _)) => {
-                        let active_mock = active_mocks.remove(index);
+                    Some(active) => {
+                        let active_mock = active_mocks.remove(active.index);
                         active_mocks = vec![active_mock];
-                        mocks[index].register_hit();
+                        mask |= active.mask;
                     }
                     None => {
                         let top_priority = priorities
                             .iter()
                             .enumerate()
-                            .min_by_key(|(index, priority)| *priority)
+                            .min_by_key(|(index, priority)| **priority)
                             .map(|(index, _)| index);
                         match top_priority {
-                            Some(index) => {
-                                let active_mock = active_mocks.remove(index);
+                            Some(active) => {
+                                let active_mock = active_mocks.remove(active);
                                 active_mocks = vec![active_mock];
-                                mocks[index].register_hit();
+                                mask |= masks[active];
+
                                 let stream = active_mocks[0]
                                     .responder
                                     .handle(receiver_holder.take().unwrap());
@@ -440,6 +467,14 @@ async fn handle_socket(mut socket: WebSocket, mocks: MockList, mut active_mocks:
                 }
             }
         }
+    }
+    debug!(
+        "Checking actual mask {:b} vs expected {:b}",
+        mask,
+        active_mocks[0].expected_mask()
+    );
+    if mask == active_mocks[0].expected_mask() && no_mismatch {
+        active_mocks[0].register_hit();
     }
     if let Some(hnd) = sender_task {
         hnd.await.unwrap().unwrap();
