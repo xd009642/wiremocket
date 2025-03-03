@@ -20,7 +20,7 @@ use std::sync::{
     Arc,
 };
 use std::time::Instant;
-use tokio::sync::{broadcast, oneshot, RwLock};
+use tokio::sync::{broadcast, oneshot, watch, Mutex, RwLock};
 use tracing::{debug, error, Instrument};
 use tungstenite::{
     protocol::{frame::Utf8Bytes, CloseFrame},
@@ -47,6 +47,7 @@ pub struct MockServer {
     addr: String,
     shutdown: Option<oneshot::Sender<()>>,
     mocks: MockList,
+    active_requests: Mutex<watch::Receiver<usize>>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -237,8 +238,17 @@ async fn ws_handler_pathless(
     headers: HeaderMap,
     params: Query<HashMap<String, String>>,
     mocks: Extension<MockList>,
+    request_counter: Extension<watch::Sender<usize>>,
 ) -> Response {
-    ws_handler(ws, Path(String::new()), headers, params, mocks).await
+    ws_handler(
+        ws,
+        Path(String::new()),
+        headers,
+        params,
+        mocks,
+        request_counter,
+    )
+    .await
 }
 
 #[inline(always)]
@@ -259,7 +269,9 @@ async fn ws_handler(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
     mocks: Extension<MockList>,
+    request_counter: Extension<watch::Sender<usize>>,
 ) -> Response {
+    request_counter.send_modify(|x| *x += 1);
     let mut active_mocks = vec![];
     let mut matched_mock: Option<ActiveMockCandidate> = None;
     let mut current_mask = 0;
@@ -303,7 +315,12 @@ async fn ws_handler(
 
     debug!("about to upgrade websocket connection");
     ws.on_upgrade(move |socket| async move {
-        handle_socket(socket, mocks.0, active_mocks, current_mask).await
+        let res =
+            tokio::task::spawn(handle_socket(socket, mocks.0, active_mocks, current_mask)).await;
+        if let Err(res) = res {
+            error!("Task panicked: {}", res);
+        }
+        request_counter.send_modify(|x| *x -= 1);
     })
 }
 
@@ -476,9 +493,6 @@ async fn handle_socket(
     if mask == active_mocks[0].expected_mask() && no_mismatch {
         active_mocks[0].register_hit();
     }
-    if let Some(hnd) = sender_task {
-        hnd.await.unwrap().unwrap();
-    }
 }
 
 impl MockServer {
@@ -493,10 +507,13 @@ impl MockServer {
     pub async fn start() -> Self {
         let mocks: MockList = Default::default();
 
+        let (tx, active_requests) = watch::channel(0);
+
         let router = Router::new()
             .route("/{*path}", any(ws_handler))
             .route("/", any(ws_handler_pathless))
-            .layer(Extension(mocks.clone()));
+            .layer(Extension(mocks.clone()))
+            .layer(Extension(tx));
         let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = format!("ws://{}", listener.local_addr().unwrap());
 
@@ -513,6 +530,7 @@ impl MockServer {
             addr,
             shutdown: Some(tx),
             mocks,
+            active_requests: Mutex::new(active_requests),
         }
     }
 
@@ -541,6 +559,17 @@ impl MockServer {
     }
 
     pub async fn mocks_pass(&self) -> bool {
+        let mut active_requests = self.active_requests.lock().await;
+        // If there's no more senders then in
+        if let Err(e) = active_requests
+            .wait_for(|x| {
+                debug!("Current active requests: {}", x);
+                *x == 0
+            })
+            .await
+        {
+            unreachable!("There should always be a sender while the server is running");
+        }
         let mut res = true;
         for (index, mock) in self.mocks.read().await.iter().enumerate() {
             let mock_res = mock.verify();

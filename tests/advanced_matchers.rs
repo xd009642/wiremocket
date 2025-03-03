@@ -2,7 +2,6 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
-use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::client::IntoClientRequest;
@@ -27,15 +26,23 @@ impl Match for BinaryStreamMatcher {
                 Some(false)
             }
         } else if last.is_close() {
-            let message = match_state.get_message(len - 2).unwrap();
-            let res = json.unary_match(message);
-            println!(
-                "Got close frame, checking {}: {:?}\ti{:?}",
-                len - 2,
-                res,
-                message
-            );
-            res
+            if len == 1 {
+                None
+            } else {
+                let message = match_state.get_message(len - 2);
+                if let Some(message) = message {
+                    let res = json.unary_match(message);
+                    println!(
+                        "Got close frame, checking {}: {:?}\ti{:?}",
+                        len - 2,
+                        res,
+                        message
+                    );
+                    res
+                } else {
+                    Some(false)
+                }
+            }
         } else if last.is_text() {
             let res = json.unary_match(last);
             match_state.keep_message(len - 1);
@@ -74,8 +81,6 @@ async fn binary_stream_matcher_passes() {
     stream.send(Message::text(val.to_string())).await.unwrap();
     stream.send(Message::Close(None)).await.unwrap();
 
-    sleep(Duration::from_millis(100)).await;
-
     std::mem::drop(stream);
 
     server.verify().await;
@@ -92,8 +97,6 @@ async fn binary_stream_matcher_passes() {
     let val = json!({"command": "stop"});
     stream.send(Message::text(val.to_string())).await.unwrap();
     stream.send(Message::Close(None)).await.unwrap();
-
-    sleep(Duration::from_millis(100)).await;
 
     std::mem::drop(stream);
 
@@ -135,8 +138,6 @@ async fn binary_stream_matcher_fails() {
 
     std::mem::drop(stream);
 
-    sleep(Duration::from_millis(100)).await;
-
     assert!(!server.mocks_pass().await);
 
     println!("Testing no end message");
@@ -154,8 +155,6 @@ async fn binary_stream_matcher_fails() {
 
     std::mem::drop(stream);
 
-    sleep(Duration::from_millis(100)).await;
-
     assert!(!server.mocks_pass().await);
 
     let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
@@ -171,8 +170,6 @@ async fn binary_stream_matcher_fails() {
     stream.send(Message::text(val.to_string())).await.unwrap();
 
     std::mem::drop(stream);
-
-    sleep(Duration::from_millis(100)).await;
 
     assert!(!server.mocks_pass().await);
 }

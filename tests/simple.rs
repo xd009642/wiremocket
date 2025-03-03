@@ -2,7 +2,6 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
-use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::client::IntoClientRequest;
@@ -35,7 +34,6 @@ async fn no_matches() {
     let (mut stream, response) = connect_async(server.uri()).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
     assert!(logs_contain("mock[0]"));
@@ -65,7 +63,6 @@ async fn only_json_matcher() {
 
     std::mem::drop(stream);
     // todo there should be a better way than this
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -87,9 +84,7 @@ async fn deny_invalid_json() {
     let val = json!({"hello": "world"}).to_string().as_bytes().to_vec();
     stream.send(Message::Ping(val.into())).await.unwrap();
 
-    // TODO there should be a better way than this
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -112,7 +107,6 @@ async fn match_path() {
     stream.send(Message::text(val.to_string())).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -138,7 +132,6 @@ async fn header_exists() {
     stream.send(Message::text(val.to_string())).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -159,7 +152,6 @@ async fn header_doesnt_exist() {
     stream.send(Message::text(val.to_string())).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -188,7 +180,6 @@ async fn header_exactly_matches() {
     let (stream, response) = connect_async(request).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -211,7 +202,6 @@ async fn header_doesnt_match() {
     let (stream, response) = connect_async(request).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -233,7 +223,6 @@ async fn query_param_matchers() {
     let (stream, response) = connect_async(uri).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     server.verify().await;
 }
@@ -258,7 +247,7 @@ async fn combine_request_and_content_matchers() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(100)).await;
+    std::mem::drop(stream);
 
     assert!(!server.mocks_pass().await);
 
@@ -271,7 +260,6 @@ async fn combine_request_and_content_matchers() {
     stream.send(Message::text(val.to_string())).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }
@@ -306,7 +294,6 @@ async fn echo_response_test() {
     assert_eq!(sent_message, echoed);
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }
@@ -331,7 +318,6 @@ async fn ensure_close_frame_sent() {
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
     stream.send(Message::text(val.to_string())).await.unwrap();
-    sleep(Duration::from_millis(100)).await;
 
     std::mem::drop(stream);
 
@@ -347,7 +333,6 @@ async fn ensure_close_frame_sent() {
     stream.send(Message::Close(None)).await.unwrap();
 
     std::mem::drop(stream);
-    sleep(Duration::from_millis(100)).await;
 
     assert!(server.mocks_pass().await);
 }
