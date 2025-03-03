@@ -3,7 +3,7 @@
 [![Build Status](https://github.com/xd009642/wiremocket/workflows/Build/badge.svg)](https://github.com/xd009642/wiremocket/actions)
 [![Latest Version](https://img.shields.io/crates/v/wiremocket.svg)](https://crates.io/crates/wiremocket)
 [![License:MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![docs.rs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://docs.rs/wiremocket)]
+[![docs.rs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://docs.rs/wiremocket)
 
 'wiremocket' provides mocking so you can perform black-box testing of Rust
 applications that interact with websocket APIs. It's heavily inspired by
