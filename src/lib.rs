@@ -161,6 +161,11 @@ impl Mock {
         self
     }
 
+    /// Add another request matcher to the `Mock` you are building.
+    ///
+    /// **All** specified [`matchers`] must match for the overall [`Mock`] you are building.
+    ///
+    /// [`matchers`]: crate::matchers
     pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
         assert!(self.matcher.len() < 65, "Cannot have more than 65 matchers");
         self.matcher.push(Arc::new(matcher));
@@ -271,11 +276,6 @@ impl Mock {
     fn register_hit(&self) {
         self.calls.fetch_add(1, Ordering::Acquire);
     }
-}
-
-pub struct RecordedConnection {
-    incoming: Vec<(Instant, Message)>,
-    outgoing: Vec<(Instant, Message)>,
 }
 
 async fn ws_handler_pathless(
@@ -591,12 +591,6 @@ impl MockServer {
     /// MockServer via a websocket client.
     pub fn uri(&self) -> String {
         self.addr.clone()
-    }
-
-    /// Return a vector with all the recorded connections to the server. In each recorded
-    /// connection you can see the incoming and outgoing messages and when they happened
-    pub fn sessions(&self) -> Vec<RecordedConnection> {
-        todo!("Record some connection info");
     }
 
     /// Asserts on [`MockServer::mocks_pass`]
