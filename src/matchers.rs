@@ -211,7 +211,7 @@ pub mod json {
     impl Match for ValidJsonMatcher {
         fn unary_match(&self, msg: &Message) -> Option<bool> {
             match msg {
-                Message::Text(t) => Some(serde_json::from_str::<Value>(&t).is_ok()),
+                Message::Text(t) => Some(serde_json::from_str::<Value>(t).is_ok()),
                 Message::Binary(b) => Some(serde_json::from_slice::<Value>(b.as_ref()).is_ok()),
                 _ => None,
             }

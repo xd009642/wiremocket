@@ -153,9 +153,9 @@ fn convert_message(msg: AxumMessage) -> Message {
 fn unconvert_message(msg: Message) -> AxumMessage {
     match msg {
         Message::Text(t) => AxumMessage::Text(t.as_str().into()),
-        Message::Binary(b) => AxumMessage::Binary(b.into()),
-        Message::Ping(p) => AxumMessage::Ping(p.into()),
-        Message::Pong(p) => AxumMessage::Pong(p.into()),
+        Message::Binary(b) => AxumMessage::Binary(b),
+        Message::Ping(p) => AxumMessage::Ping(p),
+        Message::Pong(p) => AxumMessage::Pong(p),
         Message::Close(cf) => AxumMessage::Close(cf.map(|cf| AxumCloseFrame {
             code: cf.code.into(),
             reason: cf.reason.as_str().into(),

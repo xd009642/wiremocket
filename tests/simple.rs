@@ -14,7 +14,7 @@ async fn can_connect() {
 
     println!("connecting to: {}", server.uri());
 
-    let (stream, response) = connect_async(server.uri()).await.unwrap();
+    let (stream, _response) = connect_async(server.uri()).await.unwrap();
 }
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn no_matches() {
 
     server.register(other_mock).await;
 
-    let (stream, response) = connect_async(server.uri()).await.unwrap();
+    let (stream, _response) = connect_async(server.uri()).await.unwrap();
 
     std::mem::drop(stream);
 
@@ -48,7 +48,7 @@ async fn only_json_matcher() {
         .register(Mock::given(ValidJsonMatcher).expect(1..))
         .await;
 
-    let (mut stream, response) = connect_async(server.uri()).await.unwrap();
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
 
     let val = json!({"hello": "world"});
 
@@ -75,7 +75,7 @@ async fn deny_invalid_json() {
         .register(Mock::given(ValidJsonMatcher).expect(1))
         .await;
 
-    let (mut stream, response) = connect_async(server.uri()).await.unwrap();
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
 
     stream.send(Message::text("I'm not json")).await.unwrap();
     // Make sure ping doesn't change anything
@@ -96,7 +96,7 @@ async fn match_path() {
         .register(Mock::given(path("api/stream")).expect(1..))
         .await;
 
-    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
@@ -123,7 +123,7 @@ async fn header_exists() {
         .headers_mut()
         .insert("api-key", "42".parse().unwrap());
 
-    let (mut stream, response) = connect_async(request).await.unwrap();
+    let (mut stream, _response) = connect_async(request).await.unwrap();
 
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
@@ -143,7 +143,7 @@ async fn header_doesnt_exist() {
     server
         .register(Mock::given(HeaderExistsMatcher::new("api-key")).expect(1..))
         .await;
-    let (mut stream, response) = connect_async(server.uri()).await.unwrap();
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
 
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
@@ -175,7 +175,7 @@ async fn header_exactly_matches() {
         .headers_mut()
         .append("api-key", "47".parse().unwrap());
 
-    let (stream, response) = connect_async(request).await.unwrap();
+    let (stream, _response) = connect_async(request).await.unwrap();
 
     std::mem::drop(stream);
 
@@ -197,7 +197,7 @@ async fn header_doesnt_match() {
         .headers_mut()
         .insert("api-key", "42".parse().unwrap());
 
-    let (stream, response) = connect_async(request).await.unwrap();
+    let (stream, _response) = connect_async(request).await.unwrap();
 
     std::mem::drop(stream);
 
@@ -218,7 +218,7 @@ async fn query_param_matchers() {
     // I shouldn't need the path param
     let uri = format!("{}/what?hello=world&foo=bar", server.uri());
 
-    let (stream, response) = connect_async(uri).await.unwrap();
+    let (stream, _response) = connect_async(uri).await.unwrap();
 
     std::mem::drop(stream);
 
@@ -238,7 +238,7 @@ async fn combine_request_and_content_matchers() {
         )
         .await;
 
-    let (mut stream, response) = connect_async(format!("{}/api", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api", server.uri()))
         .await
         .unwrap();
 
@@ -249,7 +249,7 @@ async fn combine_request_and_content_matchers() {
 
     assert!(!server.mocks_pass().await);
 
-    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
@@ -278,7 +278,7 @@ async fn echo_response_test() {
         )
         .await;
 
-    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
@@ -309,7 +309,7 @@ async fn ensure_close_frame_sent() {
         )
         .await;
 
-    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
@@ -321,7 +321,7 @@ async fn ensure_close_frame_sent() {
 
     assert!(!server.mocks_pass().await);
 
-    let (mut stream, response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
