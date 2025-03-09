@@ -133,3 +133,37 @@ pub fn default_doctest_state() -> MatchState {
     state.push_message(Message::Close(None));
     state
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_eviction() {
+        let mut state = MatchState::new();
+
+        state.push_message(Message::text("hello"));
+        assert_eq!(state.stored_messages.len(), 1);
+        assert_eq!(state.messages_received, 1);
+
+        state.evict();
+        assert_eq!(state.stored_messages.len(), 0);
+        assert_eq!(state.messages_received, 1);
+
+        state.push_message(Message::text("hello"));
+        state.keep_message(1);
+        state.evict();
+        assert_eq!(state.stored_messages.len(), 1);
+        assert_eq!(state.messages_received, 2);
+
+        state.forget_message(0);
+        state.evict();
+        assert_eq!(state.stored_messages.len(), 1);
+        
+        state.forget_message(1);
+        assert_eq!(state.stored_messages.len(), 1);
+        state.evict();
+        assert_eq!(state.stored_messages.len(), 0);
+    }
+
+}
