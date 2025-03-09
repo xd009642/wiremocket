@@ -334,3 +334,48 @@ async fn ensure_close_frame_sent() {
 
     assert!(server.mocks_pass().await);
 }
+
+#[tokio::test]
+#[traced_test]
+async fn matcher_priority() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(path("api/stream")).with_priority(1).expect(1))
+        .await;
+
+    server
+        .register(Mock::given(path("api/stream")).with_priority(2).expect(0))
+        .await;
+
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
+
+#[tokio::test]
+#[traced_test]
+#[should_panic]
+async fn matcher_priority_fails() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(path("api/stream")).with_priority(3).expect(1))
+        .await;
+
+    server
+        .register(Mock::given(path("api/stream")).with_priority(2).expect(0))
+        .await;
+
+    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
+        .await
+        .unwrap();
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
