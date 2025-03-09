@@ -159,11 +159,10 @@ mod tests {
         state.forget_message(0);
         state.evict();
         assert_eq!(state.stored_messages.len(), 1);
-        
+
         state.forget_message(1);
         assert_eq!(state.stored_messages.len(), 1);
         state.evict();
         assert_eq!(state.stored_messages.len(), 0);
     }
-
 }

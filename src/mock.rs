@@ -1,13 +1,13 @@
 use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
 use crate::*;
 use axum::http::header::HeaderMap;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::RwLock;
 
 pub(crate) type MockList = Arc<RwLock<Vec<Mock>>>;
 

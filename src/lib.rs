@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 use crate::match_state::*;
-use crate::responder::ResponseStream;
 use axum::{
     extract::{
         ws::{CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket, WebSocketUpgrade},
@@ -11,7 +10,7 @@ use axum::{
     routing::any,
     Extension, Router,
 };
-use futures::{sink::SinkExt, stream::StreamExt};
+use futures::stream::StreamExt;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
@@ -212,7 +211,7 @@ async fn handle_socket(
         state.evict();
         if let Ok(msg) = msg {
             let msg = convert_message(msg);
-            if let Err(e) = msg_tx.send(msg.clone()) {
+            if let Err(_) = msg_tx.send(msg.clone()) {
                 error!("Dropping messages");
             }
             debug!("Checking: {:?}", msg);
@@ -269,7 +268,7 @@ async fn handle_socket(
                         let top_priority = priorities
                             .iter()
                             .enumerate()
-                            .min_by_key(|(index, priority)| **priority)
+                            .min_by_key(|(_index, priority)| **priority)
                             .map(|(index, _)| index);
                         match top_priority {
                             Some(active) => {
@@ -288,6 +287,10 @@ async fn handle_socket(
                                         .await
                                 });
                                 debug!("Spawned responder task");
+                                assert!(
+                                    sender_task.is_none(),
+                                    "sender task should not be overwritten"
+                                );
                                 sender_task = Some(handle);
                             }
                             None => {
@@ -306,6 +309,9 @@ async fn handle_socket(
     );
     if mask == active_mocks[0].expected_mask() && no_mismatch {
         active_mocks[0].register_hit();
+    }
+    if let Some(sender_task) = sender_task {
+        sender_task.abort();
     }
 }
 
@@ -373,7 +379,7 @@ impl MockServer {
     pub async fn mocks_pass(&self) -> bool {
         let mut active_requests = self.active_requests.lock().await;
         // If there's no more senders then in
-        if let Err(e) = active_requests
+        if let Err(_) = active_requests
             .wait_for(|x| {
                 debug!("Current active requests: {}", x);
                 *x == 0
@@ -479,6 +485,7 @@ impl Drop for MockServer {
 /// ```
 pub trait Match {
     /// Check parameters available at connection initiation.
+    #[allow(unused_variables)]
     fn request_match(
         &self,
         path: &str,
@@ -489,6 +496,7 @@ pub trait Match {
     }
 
     /// Check single websocket messages in isolation.
+    #[allow(unused_variables)]
     fn unary_match(&self, message: &Message) -> Option<bool> {
         None
     }
