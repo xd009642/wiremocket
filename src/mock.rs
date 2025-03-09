@@ -150,7 +150,6 @@ impl Mock {
 }
 
 /// A fluent builder to construct a [`Mock`] instance given matchers and a [`ResponseStream`].
-#[derive(Debug)]
 pub struct MockBuilder {
     matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
     pub(crate) responder: Arc<dyn ResponseStream + Send + Sync + 'static>,
@@ -188,7 +187,7 @@ impl MockBuilder {
     ///   to be retrieved from a cache (`.expect(0)`).
     ///
     /// This technique is also called [spying](https://martinfowler.com/bliki/TestDouble.html).
-    pub fn expect(mut self, times: impl Into<Times>) -> Mock {
+    pub fn expect(self, times: impl Into<Times>) -> Mock {
         Mock {
             matcher: self.matcher,
             responder: self.responder,

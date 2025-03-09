@@ -104,7 +104,7 @@ impl MatchState {
             .rev()
             .find(|x| x.index == index)
         {
-            stored.count.saturating_sub(1);
+            stored.count = stored.count.saturating_sub(1);
         }
     }
 
