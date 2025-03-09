@@ -11,7 +11,7 @@ struct StoredMessage {
     count: usize,
 }
 
-/// Mutable state shared for every matcher. For more thorough documentation [`Match`] can be
+/// Mutable state shared for every matcher. For more thorough documentation [`Match`](crate::Match) can be
 /// consulted.
 #[derive(Debug)]
 pub struct MatchState {
@@ -104,7 +104,7 @@ impl MatchState {
             .rev()
             .find(|x| x.index == index)
         {
-            stored.count.saturating_sub(1);
+            stored.count = stored.count.saturating_sub(1);
         }
     }
 

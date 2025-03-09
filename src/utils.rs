@@ -5,8 +5,9 @@ use std::ops::{
 
 // All code below is adapted from https://docs.rs/wiremock/latest/wiremock/struct.Times.html
 
-/// Specify how many times we expect a [`Mock`] to match via [`expect`].
-/// It is used to set expectations on the usage of a [`Mock`] in a test case.
+/// Specify how many times we expect a [`Mock`](crate::mock::Mock) to match via
+/// [`expect`](crate::mock::MockBuilder::expect).
+/// It is used to set expectations on the usage of a `Mock` in a test case.
 ///
 /// You can either specify an exact value, e.g.
 /// ```rust

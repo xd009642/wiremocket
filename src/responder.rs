@@ -26,7 +26,7 @@ use tungstenite::Message;
 // that sends to it into the `Match` trait so people can send responses on matches). Or I make the
 // responder take the last client message as an output.
 
-/// All [`Mock`]s must have a valid responder. By default the `pending` responder is provided which
+/// Every [`Mock`](crate::mock::Mock) must have a valid responder. By default the `pending` responder is provided which
 /// never outputs a message.
 pub trait ResponseStream {
     /// Given a broadcast of messages from the client returns a stream of responses.
