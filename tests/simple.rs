@@ -215,6 +215,29 @@ async fn query_param_matchers() {
 
     server.register(mock.expect(1..)).await;
 
+    let uri = format!("{}/what?hello=world&foo=bar&not_here=1", server.uri());
+    let (stream, _response) = connect_async(uri).await.unwrap();
+    std::mem::drop(stream);
+    assert!(!server.mocks_pass().await);
+
+    let uri = format!("{}/what?foo=bar", server.uri());
+    let (stream, _response) = connect_async(uri).await.unwrap();
+    std::mem::drop(stream);
+    assert!(!server.mocks_pass().await);
+
+    let uri = format!("{}/what?foo=br&hello=world", server.uri());
+    let (stream, _response) = connect_async(uri).await.unwrap();
+    std::mem::drop(stream);
+    assert!(!server.mocks_pass().await);
+
+    let uri = format!("{}/what?hello=world&foo=bar", server.uri());
+
+    let (stream, _response) = connect_async(uri).await.unwrap();
+
+    std::mem::drop(stream);
+
+    server.verify().await;
+
     // I shouldn't need the path param
     let uri = format!("{}/what?hello=world&foo=bar", server.uri());
 
