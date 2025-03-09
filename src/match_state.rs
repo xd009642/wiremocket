@@ -11,7 +11,7 @@ struct StoredMessage {
     count: usize,
 }
 
-/// Mutable state shared for every matcher. For more thorough documentation [`Match`] can be
+/// Mutable state shared for every matcher. For more thorough documentation [`Match`](crate::Match) can be
 /// consulted.
 #[derive(Debug)]
 pub struct MatchState {

@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 
 pub(crate) type MockList = Arc<RwLock<Vec<Mock>>>;
 
@@ -73,99 +73,13 @@ impl Mock {
     /// Start building a [`Mock`] specifying the first matcher.
     ///
     /// TODO this should return a builder actually.
-    pub fn given(matcher: impl Match + Send + Sync + 'static) -> Self {
-        Self {
+    pub fn given(matcher: impl Match + Send + Sync + 'static) -> MockBuilder {
+        MockBuilder {
             matcher: vec![Arc::new(matcher)],
             responder: Arc::new(pending()),
             name: None,
             priority: 5,
-            expected_calls: Default::default(),
-            calls: Default::default(),
         }
-    }
-
-    /// Assign a name to your mock.  
-    ///
-    /// The mock name will be used in error messages (e.g. if the mock expectation
-    /// is not satisfied) and debug logs to help you identify what failed.
-    pub fn named<T: Into<String>>(mut self, mock_name: T) -> Self {
-        self.name = Some(mock_name.into());
-        self
-    }
-
-    /// Set an expectation on the number of times this [`Mock`] should match in the current
-    /// test case.
-    ///
-    /// Unlike wiremock no expectations are checked when the server is shutting down. Although this
-    /// may change in the future.
-    ///
-    /// By default, no expectation is set for [`Mock`]s.
-    ///
-    /// ### When is this useful?
-    ///
-    /// `expect` can turn out handy when you'd like to verify that a certain side-effect has
-    /// (or has not!) taken place.
-    ///
-    /// For example:
-    /// - check that a 3rd party notification API (e.g. email service) is called when an event
-    ///   in your application is supposed to trigger a notification;
-    /// - check that a 3rd party API is NOT called when the response of a call is expected
-    ///   to be retrieved from a cache (`.expect(0)`).
-    ///
-    /// This technique is also called [spying](https://martinfowler.com/bliki/TestDouble.html).
-    pub fn expect(mut self, times: impl Into<Times>) -> Self {
-        self.expected_calls = Arc::new(times.into());
-        self
-    }
-
-    /// Add another request matcher to the `Mock` you are building.
-    ///
-    /// **All** specified [`matchers`] must match for the overall [`Mock`] you are building.
-    ///
-    /// [`matchers`]: crate::matchers
-    pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
-        assert!(self.matcher.len() < 65, "Cannot have more than 65 matchers");
-        self.matcher.push(Arc::new(matcher));
-        self
-    }
-
-    /// Specify a priority for this [`Mock`].
-    /// Use this when you mount many [`Mock`] in a [`MockServer`]
-    /// and those mocks have interlaced request matching conditions
-    /// e.g. `mock A` accepts path `/abcd` and `mock B` a path regex `[a-z]{4}`
-    /// It is recommended to set the highest priority (1) for mocks with exact conditions (`mock A` in this case)
-    /// `1` is the highest priority, `255` the lowest, default to `5`
-    /// If two mocks have the same priority, priority is defined by insertion order (first one mounted has precedence over the others).
-    pub fn with_priority(mut self, priority: u8) -> Self {
-        assert!(priority > 0, "priority must be strictly greater than 0!");
-        self.priority = priority;
-        self
-    }
-
-    /// Sets a responder for the `Mock`. If you have a simpler function you can use
-    /// `Mock::one_to_one_response` or `Mock::response_stream` to determine how the `Mock` responds.
-    pub fn set_responder(mut self, responder: impl ResponseStream + Send + Sync + 'static) -> Self {
-        self.responder = Arc::new(responder);
-        self
-    }
-
-    /// This `Mock` will respond with a stream of `Messages` independent of the inputs received.
-    pub fn response_stream<F, S>(mut self, ctor: F) -> Self
-    where
-        F: Fn() -> S + Send + Sync + 'static,
-        S: Stream<Item = Message> + Send + Sync + 'static,
-    {
-        self.responder = Arc::new(StreamResponse::new(ctor));
-        self
-    }
-
-    /// For each `Message` from the client respond with a `Message`.
-    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
-    where
-        F: Fn(Message) -> Message + Send + Sync + 'static,
-    {
-        self.responder = Arc::new(MapResponder::new(map_fn));
-        self
     }
 
     /// You can use this to verify the mock separately to the one you put into the server (if
@@ -232,5 +146,106 @@ impl Mock {
 
     pub(crate) fn register_hit(&self) {
         self.calls.fetch_add(1, Ordering::Acquire);
+    }
+}
+
+/// A fluent builder to construct a [`Mock`] instance given matchers and a [`ResponseStream`].
+#[derive(Debug)]
+pub struct MockBuilder {
+    matcher: Vec<Arc<dyn Match + Send + Sync + 'static>>,
+    pub(crate) responder: Arc<dyn ResponseStream + Send + Sync + 'static>,
+    pub(crate) name: Option<String>,
+    pub(crate) priority: u8,
+}
+
+impl MockBuilder {
+    /// Assign a name to your mock.  
+    ///
+    /// The mock name will be used in error messages (e.g. if the mock expectation
+    /// is not satisfied) and debug logs to help you identify what failed.
+    pub fn named<T: Into<String>>(mut self, mock_name: T) -> Self {
+        self.name = Some(mock_name.into());
+        self
+    }
+
+    /// Set an expectation on the number of times this [`Mock`] should match in the current
+    /// test case.
+    ///
+    /// Unlike wiremock no expectations are checked when the server is shutting down. Although this
+    /// may change in the future.
+    ///
+    /// By default, no expectation is set for [`Mock`]s.
+    ///
+    /// ### When is this useful?
+    ///
+    /// `expect` can turn out handy when you'd like to verify that a certain side-effect has
+    /// (or has not!) taken place.
+    ///
+    /// For example:
+    /// - check that a 3rd party notification API (e.g. email service) is called when an event
+    ///   in your application is supposed to trigger a notification;
+    /// - check that a 3rd party API is NOT called when the response of a call is expected
+    ///   to be retrieved from a cache (`.expect(0)`).
+    ///
+    /// This technique is also called [spying](https://martinfowler.com/bliki/TestDouble.html).
+    pub fn expect(mut self, times: impl Into<Times>) -> Mock {
+        Mock {
+            matcher: self.matcher,
+            responder: self.responder,
+            expected_calls: Arc::new(times.into()),
+            calls: Default::default(),
+            name: self.name,
+            priority: self.priority,
+        }
+    }
+
+    /// Add another request matcher to the `Mock` you are building.
+    ///
+    /// **All** specified [`matchers`] must match for the overall [`Mock`] you are building.
+    ///
+    /// [`matchers`]: crate::matchers
+    pub fn add_matcher(mut self, matcher: impl Match + Send + Sync + 'static) -> Self {
+        assert!(self.matcher.len() < 65, "Cannot have more than 65 matchers");
+        self.matcher.push(Arc::new(matcher));
+        self
+    }
+
+    /// Specify a priority for this [`Mock`].
+    /// Use this when you mount many [`Mock`] in a [`MockServer`]
+    /// and those mocks have interlaced request matching conditions
+    /// e.g. `mock A` accepts path `/abcd` and `mock B` a path regex `[a-z]{4}`
+    /// It is recommended to set the highest priority (1) for mocks with exact conditions (`mock A` in this case)
+    /// `1` is the highest priority, `255` the lowest, default to `5`
+    /// If two mocks have the same priority, priority is defined by insertion order (first one mounted has precedence over the others).
+    pub fn with_priority(mut self, priority: u8) -> Self {
+        assert!(priority > 0, "priority must be strictly greater than 0!");
+        self.priority = priority;
+        self
+    }
+
+    /// Sets a responder for the `Mock`. If you have a simpler function you can use
+    /// `Mock::one_to_one_response` or `Mock::response_stream` to determine how the `Mock` responds.
+    pub fn set_responder(mut self, responder: impl ResponseStream + Send + Sync + 'static) -> Self {
+        self.responder = Arc::new(responder);
+        self
+    }
+
+    /// This `Mock` will respond with a stream of `Messages` independent of the inputs received.
+    pub fn response_stream<F, S>(mut self, ctor: F) -> Self
+    where
+        F: Fn() -> S + Send + Sync + 'static,
+        S: Stream<Item = Message> + Send + Sync + 'static,
+    {
+        self.responder = Arc::new(StreamResponse::new(ctor));
+        self
+    }
+
+    /// For each `Message` from the client respond with a `Message`.
+    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
+    where
+        F: Fn(Message) -> Message + Send + Sync + 'static,
+    {
+        self.responder = Arc::new(MapResponder::new(map_fn));
+        self
     }
 }

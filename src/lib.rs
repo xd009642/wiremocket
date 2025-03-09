@@ -39,7 +39,7 @@ pub mod prelude {
 }
 
 /// Server here we'd apply our mock servers and ability to verify requests. Based off of
-/// https://docs.rs/wiremock/latest/wiremock/struct.MockServer.html
+/// <https://docs.rs/wiremock/latest/wiremock/struct.MockServer.html>
 pub struct MockServer {
     addr: String,
     shutdown: Option<oneshot::Sender<()>>,
@@ -418,31 +418,33 @@ impl Drop for MockServer {
 ///
 /// Point 2. is actually a subset of 3. but it is much simpler hence it's own method. Because a
 /// `Match` may not be applied in all 3 domains there is the ability for it to return `None`. For
-/// example, if we have a [`CloseFrameReceivedMatcher`] this only checks if a close frame is
-/// received, every other component of the request is irrelevant and when checking them will return
-/// a `None`. Likewise the `PatchExactMatcher` can only return `Some(true)` when we look at the
-/// initial request parameters. Once the body is being received it's irrelevant.
+/// example, if we have a [`CloseFrameReceivedMatcher`](crate::matchers::CloseFrameReceivedMatcher)
+/// this only checks if a close frame is received, every other component of the request is irrelevant
+/// and when checking them will return a `None`. Likewise the `PatchExactMatcher` can only return
+/// `Some(true)` when we look at the initial request parameters. Once the body is being received
+/// it's irrelevant.
 ///
 /// # Temporal Matching
 ///
 /// Here we care about the state of the stream of messages. When `Match::temporal_match` is called
-/// it will be after a message is received. [`MatchState::last`] will return the most recent
-/// message.
+/// it will be after a message is received. [`MatchState::last`](crate::match_state::MatchState::last)
+/// will return the most recent message.
 ///
 /// To avoid storing all messages if your `Match` implementation will require access to a message
-/// in future passes use [`MatchState::keep_message`] to retain the message in the buffer. Likewise
-/// when your `Match` doesn't want the message anymore call [`MatchStatus::forget_message`].
+/// in future passes use [`MatchState::keep_message`](crate::match_state::MatchState::keep_message)
+/// to retain the message in the buffer. Likewise when your `Match` doesn't want the message anymore call
+/// [`MatchState::forget_message`](crate::match_state::MatchState::forget_message).
 ///
 /// One thing to note is because unary message matching is a special case of temporal message
-/// handling the default temporal matcher calls the unary method with [`MatchState::last`] as the
-/// argument.
+/// handling the default temporal matcher calls the unary method with
+/// [`MatchState::last`](crate::match_state::MatchState::last) as the argument.
 ///
 /// ## Note
 ///
-/// If you call [`MatchStatus::forget_message`] twice for the same index in the same `Match`
-/// instance during a connection you may evict a message which another `Match` required for
-/// temporal checking. Take care you don't over-forget messages to avoid tests failing erroneous
-/// (or worse passing eroneously).
+/// If you call [`MatchState::forget_message`](crate::match_state::MatchState::forget_message)
+/// twice for the same index in the same `Match` instance during a connection you may evict a
+/// message which another `Match` required for temporal checking. Take care you don't over-forget
+/// messages to avoid tests failing erroneous (or worse passing eroneously).
 ///
 /// This is done in part to allow for reduced resource usage (and ease of implementation).
 ///
