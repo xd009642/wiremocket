@@ -27,6 +27,7 @@ pub mod match_state;
 pub mod matchers;
 pub mod mock;
 pub mod responder;
+pub mod server;
 pub mod utils;
 
 /// Re-exports every part of the public API for ease of use.
@@ -352,6 +353,11 @@ impl MockServer {
             mocks,
             active_requests: Mutex::new(active_requests),
         }
+    }
+
+    pub(crate) async fn reset(&self) {
+        assert_eq!(*self.active_requests.lock().await.borrow(), 0);
+        self.mocks.write().await.clear();
     }
 
     /// Register a mock on an instance of the mock server.
