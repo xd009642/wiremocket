@@ -1,4 +1,4 @@
-use crate::MockServer;
+use crate::server::bare::MockServer;
 use deadpool::managed::{Manager, Metrics, Pool, RecycleResult};
 use std::convert::Infallible;
 use std::sync::LazyLock;
@@ -14,7 +14,6 @@ static MOCK_SERVER_POOL: LazyLock<Pool<MockServerPoolManager>> = LazyLock::new(|
         .expect("Building a server pool is not expected to fail. Please report an issue")
 });
 
-
 #[derive(Debug)]
 pub(crate) struct MockServerPoolManager;
 
@@ -28,6 +27,6 @@ impl Manager for MockServerPoolManager {
 
     async fn recycle(&self, obj: &mut Self::Type, metrics: &Metrics) -> RecycleResult<Self::Error> {
         obj.reset().await;
-        Ok(()) 
+        Ok(())
     }
 }
