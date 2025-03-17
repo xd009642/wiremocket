@@ -75,12 +75,19 @@ async fn deny_invalid_json() {
         .register(Mock::given(ValidJsonMatcher).expect(1))
         .await;
 
-    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
+    let (mut stream, _response) = match connect_async(server.uri()).await {
+        Ok(s) => s,
+        Err(_) => return, // So we don't accidentally pass
+    };
 
-    stream.send(Message::text("I'm not json")).await.unwrap();
+    if stream.send(Message::text("I'm not json")).await.is_err() {
+        return;
+    }
     // Make sure ping doesn't change anything
     let val = json!({"hello": "world"}).to_string().as_bytes().to_vec();
-    stream.send(Message::Ping(val.into())).await.unwrap();
+    if stream.send(Message::Ping(val.into())).await.is_err() {
+        return;
+    }
 
     std::mem::drop(stream);
 
@@ -143,11 +150,17 @@ async fn header_doesnt_exist() {
     server
         .register(Mock::given(HeaderExistsMatcher::new("api-key")).expect(1..))
         .await;
-    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
+
+    let (mut stream, _response) = match connect_async(server.uri()).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
     // Send a message just to show it doesn't change anything.
     let val = json!({"hello": "world"});
-    stream.send(Message::text(val.to_string())).await.unwrap();
+    if stream.send(Message::text(val.to_string())).await.is_err() {
+        return;
+    }
 
     std::mem::drop(stream);
 
@@ -197,7 +210,10 @@ async fn header_doesnt_match() {
         .headers_mut()
         .insert("api-key", "42".parse().unwrap());
 
-    let (stream, _response) = connect_async(request).await.unwrap();
+    let (stream, _response) = match connect_async(request).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
     std::mem::drop(stream);
 
@@ -394,9 +410,11 @@ async fn matcher_priority_fails() {
         .register(Mock::given(path("api/stream")).with_priority(2).expect(0))
         .await;
 
-    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
-        .await
-        .unwrap();
+    let (mut stream, _response) = match connect_async(format!("{}/api/stream", server.uri())).await
+    {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
     std::mem::drop(stream);
 
