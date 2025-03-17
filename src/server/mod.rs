@@ -6,7 +6,6 @@ use crate::utils::*;
 use std::ops::Deref;
 
 pub mod bare;
-pub mod exposed_server;
 pub mod pool;
 
 #[derive(Debug)]
