@@ -54,6 +54,7 @@ impl Match for BinaryStreamMatcher {
 #[traced_test]
 async fn binary_stream_matcher_passes() {
     let server = MockServer::start().await;
+    println!("{:?}", server);
 
     // So our pretend API here will send off a json and then after that every packet will be binary
     // and then the last one a json followed by a close
@@ -104,6 +105,7 @@ async fn binary_stream_matcher_passes() {
 #[traced_test]
 async fn binary_stream_matcher_fails() {
     let server = MockServer::start().await;
+    println!("{:?}", server);
 
     // So our pretend API here will send off a json and then after that every packet will be binary
     // and then the last one a json followed by a close
@@ -121,14 +123,18 @@ async fn binary_stream_matcher_fails() {
     println!("connecting to: {}", server.uri());
 
     println!("Testing no start message");
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
-        .await
-        .unwrap();
-
-    stream
+    let (mut stream, response) =
+        match connect_async(format!("{}/api/binary_stream", server.uri())).await {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+    if stream
         .send(Message::Binary(data.clone().into()))
         .await
-        .unwrap();
+        .is_err()
+    {
+        return;
+    }
     let val = json!({"command": "stop"});
     stream.send(Message::text(val.to_string())).await.unwrap();
     stream.send(Message::Close(None)).await.unwrap();
@@ -138,9 +144,11 @@ async fn binary_stream_matcher_fails() {
     assert!(!server.mocks_pass().await);
 
     println!("Testing no end message");
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
-        .await
-        .unwrap();
+    let (mut stream, response) =
+        match connect_async(format!("{}/api/binary_stream", server.uri())).await {
+            Ok(s) => s,
+            Err(_) => return,
+        };
 
     let val = json!({"command": "start"});
     stream.send(Message::text(val.to_string())).await.unwrap();

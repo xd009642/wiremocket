@@ -21,7 +21,7 @@ use tungstenite::{
 };
 
 pub use crate::mock::*;
-pub use crate::server::bare::MockServer;
+pub use crate::server::MockServer;
 pub use crate::utils::*;
 
 pub mod match_state;

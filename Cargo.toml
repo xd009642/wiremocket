@@ -17,7 +17,7 @@ serde_json = ["dep:serde_json"]
 
 [dependencies]
 async-stream = "0.3.6"
-axum = { version = "0.8.1", features = ["ws"] }
+axum = { version = "0.8.1", features = ["tracing", "ws"] }
 deadpool = { version = "0.12.2", features = ["rt_tokio_1"] }
 futures = "0.3.31"
 serde_json = { version = "1.0.133", optional = true }

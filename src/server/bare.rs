@@ -13,6 +13,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 use std::collections::HashMap;
+use std::fmt;
 use std::future::IntoFuture;
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
 use tracing::{debug, error, Instrument};
@@ -22,12 +23,19 @@ use tungstenite::{
 };
 
 /// Server here we'd apply our mock servers and ability to verify requests. Based off of
-/// <https://docs.rs/wiremock/latest/wiremock/struct.MockServer.html>
-pub struct MockServer {
+/// <https://docs.rs/wiremock/latest/wiremock/struct.BareMockServer.html>
+pub struct BareMockServer {
     addr: String,
-    shutdown: Option<oneshot::Sender<()>>,
     mocks: MockList,
     active_requests: Mutex<watch::Receiver<usize>>,
+}
+
+impl fmt::Debug for BareMockServer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BareMockServer")
+            .field("addr", &self.addr)
+            .finish()
+    }
 }
 
 struct ActiveMockCandidate {
@@ -294,14 +302,14 @@ async fn handle_socket(
     }
 }
 
-impl MockServer {
-    /// Start a new instance of a MockServer listening on a random port.
+impl BareMockServer {
+    /// Start a new instance of a BareMockServer listening on a random port.
     ///
-    /// Each instance of MockServer is fully isolated: start takes care of
+    /// Each instance of BareMockServer is fully isolated: start takes care of
     /// finding a random port available on your local machine which is assigned
-    /// to the new MockServer.
+    /// to the new BareMockServer.
     ///
-    /// You should use one instance of MockServer for each REST API that your
+    /// You should use one instance of BareMockServer for each REST API that your
     /// application interacts with and needs mocking for testing purposes.
     pub async fn start() -> Self {
         let mocks: MockList = Default::default();
@@ -318,16 +326,18 @@ impl MockServer {
 
         debug!("axum listening on: {}", addr);
 
-        let (tx, rx) = oneshot::channel();
-        let listening_server = axum::serve(listener, router).with_graceful_shutdown(async move {
-            let _ = rx.await;
-        });
+        let listening_server = axum::serve(listener, router);
 
-        tokio::task::spawn(listening_server.into_future().in_current_span());
+        tokio::task::spawn(
+            async {
+                let r = listening_server.into_future().await;
+                debug!("No longer listening for requests: {:?}", r)
+            }
+            .in_current_span(),
+        );
 
         Self {
             addr,
-            shutdown: Some(tx),
             mocks,
             active_requests: Mutex::new(active_requests),
         }
@@ -343,16 +353,16 @@ impl MockServer {
         self.mocks.write().await.push(mock);
     }
 
-    /// Return the base uri of this running instance of MockServer, e.g.
+    /// Return the base uri of this running instance of BareMockServer, e.g.
     /// ws://127.0.0.1:4372.
     ///
     /// Use this method to compose uris when interacting with this instance of
-    /// MockServer via a websocket client.
+    /// BareMockServer via a websocket client.
     pub fn uri(&self) -> String {
         self.addr.clone()
     }
 
-    /// Asserts on [`MockServer::mocks_pass`]
+    /// Asserts on [`BareMockServer::mocks_pass`]
     pub async fn verify(&self) {
         assert!(self.mocks_pass().await);
     }
@@ -386,12 +396,5 @@ impl MockServer {
             res &= mock_res;
         }
         res
-    }
-}
-
-impl Drop for MockServer {
-    fn drop(&mut self) {
-        let tx = self.shutdown.take().unwrap();
-        let _ = tx.send(());
     }
 }
