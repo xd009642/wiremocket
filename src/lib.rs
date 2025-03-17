@@ -69,6 +69,7 @@ fn can_consider(match_res: Option<bool>) -> bool {
     matches!(match_res, Some(true) | None)
 }
 
+#[derive(Debug)]
 struct ActiveMockCandidate {
     index: usize,
     mock_status: MatchStatus,
@@ -214,7 +215,6 @@ async fn handle_socket(
             if let Err(_) = msg_tx.send(msg.clone()) {
                 error!("Dropping messages");
             }
-            debug!("Checking: {:?}", msg);
             state.push_message(msg);
             if active_mocks.len() == 1 {
                 let (status, message_mask) = active_mocks[0].check_message(&mut state);
@@ -236,6 +236,7 @@ async fn handle_socket(
                         // TODO this will break if the user actually uses priority 255..
                         priorities.push(u8::MAX);
                     }
+                    debug!("{}: {:?}", index, mock_status);
                     masks.push(mask_hits);
                     if matches!(mock_status, MatchStatus::Full | MatchStatus::Partial) {
                         if let Some(best_match) = &mut matched_mock {
@@ -258,11 +259,28 @@ async fn handle_socket(
                         }
                     }
                 }
+                debug!("Matched: {:?}", matched_mock);
                 match matched_mock {
                     Some(active) => {
                         let active_mock = active_mocks.remove(active.index);
                         active_mocks = vec![active_mock];
                         mask |= active.mask;
+                        let stream = active_mocks[0]
+                            .responder
+                            .handle(receiver_holder.take().unwrap());
+                        let sender = sender_holder.take().unwrap();
+                        let handle = tokio::task::spawn(async move {
+                            stream
+                                .map(|x| Ok(unconvert_message(x)))
+                                .forward(sender)
+                                .await
+                        });
+                        debug!("Spawned responder task");
+                        assert!(
+                            sender_task.is_none(),
+                            "sender task should not be overwritten"
+                        );
+                        sender_task = Some(handle);
                     }
                     None => {
                         let top_priority = priorities
@@ -509,10 +527,10 @@ pub trait Match {
 
 impl<F> Match for F
 where
-    F: Fn(&Message) -> bool,
+    F: Fn(&Message) -> Option<bool>,
     F: Send + Sync,
 {
     fn unary_match(&self, msg: &Message) -> Option<bool> {
-        Some(self(msg))
+        self(msg)
     }
 }

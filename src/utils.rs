@@ -134,3 +134,47 @@ impl_from_for_range!(RangeTo);
 impl_from_for_range!(RangeFrom);
 impl_from_for_range!(RangeInclusive);
 impl_from_for_range!(RangeToInclusive);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_sanity_test() {
+        let t: Times = 5.into();
+        assert!(t.contains(5));
+        assert!(!(t.contains(4) || t.contains(6)));
+
+        let t: Times = (0..5).into();
+        assert!(!t.contains(5));
+        assert!(t.contains(4) || t.contains(0));
+
+        let expected = [false, false, true, true, true, false, false];
+
+        let t1: Times = (2..5).into();
+        let t2: Times = (2..=4).into();
+
+        for (index, val) in expected.iter().enumerate() {
+            assert_eq!(t1.contains(index as u64), *val);
+            assert_eq!(t2.contains(index as u64), *val);
+        }
+
+        let t: Times = (..).into();
+        let t_d = Times::default();
+        for i in 0..100 {
+            assert!(t.contains(fastrand::u64(..)));
+            assert!(t_d.contains(fastrand::u64(..)));
+        }
+
+        let t1: Times = (..10).into();
+        let t2: Times = (..=9).into();
+        let t3: Times = (10..).into();
+
+        for i in 0..100 {
+            let first_segment = i < 10;
+            assert_eq!(t1.contains(i as u64), first_segment);
+            assert_eq!(t2.contains(i as u64), first_segment);
+            assert_eq!(t3.contains(i as u64), !first_segment);
+        }
+    }
+}

@@ -420,3 +420,45 @@ async fn matcher_priority_fails() {
 
     assert!(server.mocks_pass().await);
 }
+
+#[tokio::test]
+#[traced_test]
+async fn lambda_never_matches() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(|msg: &Message| Some(false)).expect(0))
+        .await;
+
+    server
+        .register(Mock::given(|msg: &Message| None).expect(0))
+        .await;
+
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
+
+    stream.send(Message::text("hello")).await.unwrap();
+    stream.send(Message::Close(None)).await.unwrap();
+
+    std::mem::drop(stream);
+
+    server.verify().await;
+}
+
+#[tokio::test]
+#[traced_test]
+async fn lambda_always_matches() {
+    let server = MockServer::start().await;
+
+    server
+        .register(Mock::given(|msg: &Message| Some(true)).expect(1))
+        .await;
+
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
+
+    stream.send(Message::text("hello")).await.unwrap();
+    stream.send(Message::Close(None)).await.unwrap();
+
+    std::mem::drop(stream);
+
+    server.verify().await;
+}

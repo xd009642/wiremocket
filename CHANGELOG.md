@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Mock creation now goes via a builder type to prevent some correctness issues involving cloning and
 attaching multiple modified copies of a mock
+- Lambda function for matcher now has to return an `Option<bool>`
 
 ### Fixed
 - Fixed some intra-doc links which were broken

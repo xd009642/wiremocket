@@ -68,7 +68,7 @@ async fn binary_stream_matcher_passes() {
 
     println!("connecting to: {}", server.uri());
 
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/binary_stream", server.uri()))
         .await
         .unwrap();
 
@@ -82,7 +82,7 @@ async fn binary_stream_matcher_passes() {
 
     server.verify().await;
 
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/binary_stream", server.uri()))
         .await
         .unwrap();
 
@@ -121,7 +121,7 @@ async fn binary_stream_matcher_fails() {
     println!("connecting to: {}", server.uri());
 
     println!("Testing no start message");
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/binary_stream", server.uri()))
         .await
         .unwrap();
 
@@ -138,7 +138,7 @@ async fn binary_stream_matcher_fails() {
     assert!(!server.mocks_pass().await);
 
     println!("Testing no end message");
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/binary_stream", server.uri()))
         .await
         .unwrap();
 
@@ -154,7 +154,7 @@ async fn binary_stream_matcher_fails() {
 
     assert!(!server.mocks_pass().await);
 
-    let (mut stream, response) = connect_async(format!("{}/api/binary_stream", server.uri()))
+    let (mut stream, _response) = connect_async(format!("{}/api/binary_stream", server.uri()))
         .await
         .unwrap();
 
@@ -169,4 +169,80 @@ async fn binary_stream_matcher_fails() {
     std::mem::drop(stream);
 
     assert!(!server.mocks_pass().await);
+}
+
+struct DefaultMatcher;
+
+impl Match for DefaultMatcher {}
+
+#[tokio::test]
+#[traced_test]
+async fn default_matcher_wont_pass() {
+    let server = MockServer::start().await;
+
+    // So our pretend API here will send off a json and then after that every packet will be binary
+    // and then the last one a json followed by a close
+    server
+        .register(Mock::given(DefaultMatcher).expect(1..))
+        .await;
+
+    println!("connecting to: {}", server.uri());
+
+    let (mut stream, _response) = connect_async(server.uri()).await.unwrap();
+
+    stream.send(Message::text("hello")).await.unwrap();
+    stream
+        .send(Message::text(r#"{"json": true}"#))
+        .await
+        .unwrap();
+    stream.send(Message::Close(None)).await.unwrap();
+
+    std::mem::drop(stream);
+
+    assert!(!server.mocks_pass().await);
+}
+
+#[tokio::test]
+#[traced_test]
+async fn mock_overloading_match() {
+    let server = MockServer::start().await;
+
+    // So our pretend API here will send off a json and then after that every packet will be binary
+    // and then the last one a json followed by a close
+    server
+        .register(
+            Mock::given(|msg: &Message| match msg {
+                Message::Binary(_) => Some(true),
+                Message::Ping(_) | Message::Pong(_) | Message::Close(_) => None,
+                _ => Some(false),
+            })
+            .add_matcher(CloseFrameReceivedMatcher)
+            .expect(0),
+        )
+        .await;
+
+    server
+        .register(
+            Mock::given(|msg: &Message| match msg {
+                Message::Text(_) => Some(true),
+                Message::Ping(_) | Message::Pong(_) | Message::Close(_) => None,
+                _ => Some(false),
+            })
+            .add_matcher(CloseFrameReceivedMatcher)
+            .expect(1),
+        )
+        .await;
+
+    println!("connecting to: {}", server.uri());
+
+    let (mut stream, _response) = connect_async(format!("{}", server.uri())).await.unwrap();
+
+    let val = json!({"command": "stop"});
+    stream.send(Message::text(val.to_string())).await.unwrap();
+    stream.send(Message::text("hello world")).await.unwrap();
+    stream.send(Message::Close(None)).await.unwrap();
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
 }
