@@ -183,10 +183,6 @@ async fn header_exactly_matches() {
     request
         .headers_mut()
         .append("api-key", "45".parse().unwrap());
-    // You're allowed an extra one, as a treat
-    request
-        .headers_mut()
-        .append("api-key", "47".parse().unwrap());
 
     let (stream, _response) = connect_async(request).await.unwrap();
 

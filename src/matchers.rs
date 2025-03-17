@@ -43,7 +43,40 @@ impl Match for PathExactMatcher {
     }
 }
 
-/// Match exactly the header of a request.
+/// Match **exactly** the header of a request.
+///
+/// ### Example
+///
+/// Instead of constructing the server in the examples I'll just construct the `HeaderMap` type
+/// from HTTP and call the `Match` implementation directly for demonstration purposes. It is
+/// expected you pass `HeaderExactMatcher` into a `Mock` to use it in your tests.
+///
+/// ```rust
+/// use wiremocket::prelude::*;
+/// use http::{HeaderMap, header::*};
+/// use std::collections::HashMap;
+///
+/// let matcher = headers("cache-control", vec!["no-cache", "no-store"]);
+///
+/// let mut headers = HeaderMap::new();
+///
+/// headers.insert(HOST, "example.com".parse().unwrap());
+/// headers.insert("cache-control", "no-cache".parse().unwrap());
+///
+/// let query = HashMap::default();
+///
+/// assert_eq!(matcher.request_match("", &headers, &query), Some(false));
+///
+/// // Adds a value to the header, doesn't remove the prior value
+/// headers.append("cache-control", "no-store".parse().unwrap());
+/// assert_eq!(matcher.request_match("", &headers, &query), Some(true));
+///
+/// // Order matters!
+/// headers.insert("cache-control", "no-store".parse().unwrap());
+/// headers.append("cache-control", "no-cache".parse().unwrap());
+///
+/// assert_eq!(matcher.request_match("", &headers, &query), Some(false));
+/// ```
 pub struct HeaderExactMatcher(HeaderName, Vec<HeaderValue>);
 
 impl Match for HeaderExactMatcher {
@@ -53,9 +86,30 @@ impl Match for HeaderExactMatcher {
         headers: &HeaderMap,
         _query: &HashMap<String, String>,
     ) -> Option<bool> {
-        let all_values = headers.get_all(&self.0);
-        Some(self.1.iter().all(|x| all_values.iter().any(|v| v == x)))
+        let values = headers
+            .get_all(&self.0)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| {
+                v.split(',')
+                    .map(str::trim)
+                    .filter_map(|v| HeaderValue::from_str(v).ok())
+            })
+            .collect::<Vec<_>>();
+
+        // Order matters
+        Some(values == self.1)
     }
+}
+
+pub fn headers<Name, Value>(name: Name, values: Vec<Value>) -> HeaderExactMatcher
+where
+    Name: TryInto<HeaderName>,
+    <Name as TryInto<HeaderName>>::Error: Debug,
+    Value: TryInto<HeaderValue>,
+    <Value as TryInto<HeaderValue>>::Error: Debug,
+{
+    HeaderExactMatcher::new(name, values)
 }
 
 impl HeaderExactMatcher {
