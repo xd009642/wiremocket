@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 use crate::match_state::*;
 use axum::http::header::HeaderMap;
-use futures::stream::StreamExt;
 use std::collections::HashMap;
 use tracing::debug;
 use tungstenite::Message;
