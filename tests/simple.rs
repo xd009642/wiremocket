@@ -383,7 +383,7 @@ async fn matcher_priority() {
         .register(Mock::given(path("api/stream")).with_priority(2).expect(0))
         .await;
 
-    let (mut stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
+    let (stream, _response) = connect_async(format!("{}/api/stream", server.uri()))
         .await
         .unwrap();
 
@@ -406,8 +406,7 @@ async fn matcher_priority_fails() {
         .register(Mock::given(path("api/stream")).with_priority(2).expect(0))
         .await;
 
-    let (mut stream, _response) = match connect_async(format!("{}/api/stream", server.uri())).await
-    {
+    let (stream, _response) = match connect_async(format!("{}/api/stream", server.uri())).await {
         Ok(s) => s,
         Err(_) => return,
     };

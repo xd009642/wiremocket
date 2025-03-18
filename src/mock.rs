@@ -1,3 +1,5 @@
+//! A [`Mock`] will match requests, check they match preconditions and initiate the server
+//! responses. This is the core of the server behaviour.
 use crate::responder::{pending, MapResponder, ResponseStream, StreamResponse};
 use crate::*;
 use axum::http::header::HeaderMap;

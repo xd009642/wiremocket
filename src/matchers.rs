@@ -102,6 +102,7 @@ impl Match for HeaderExactMatcher {
     }
 }
 
+/// Shorthand for [`HeaderExactMatcher::new`] matching multi-value headers.
 pub fn headers<Name, Value>(name: Name, values: Vec<Value>) -> HeaderExactMatcher
 where
     Name: TryInto<HeaderName>,

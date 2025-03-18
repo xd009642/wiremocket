@@ -1,4 +1,4 @@
-use crate::match_state::*;
+//! Code related to starting, running and interacting with the mock websocket server.
 use crate::*;
 use axum::{
     extract::{
@@ -21,6 +21,7 @@ use tungstenite::{
     Message,
 };
 
+/// A builder providing a fluent API to setup the [`MockServer`] step-by-step.
 #[derive(Default)]
 pub struct MockServerBuilder {
     listener: Option<TcpListener>,
@@ -318,11 +319,14 @@ async fn handle_socket(
 }
 
 impl MockServerBuilder {
+    /// Explicitly set the listener for the [`MockServer`] for when you don't want the IP randomly
+    /// assigned.
     pub fn listener(mut self, listener: TcpListener) -> Self {
         self.listener = Some(listener);
         self
     }
 
+    /// Builds the [`MockServer`] with the given configuration.
     pub async fn build(self) -> MockServer {
         match self.listener {
             Some(l) => MockServer::start_with_listener(l),
