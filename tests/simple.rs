@@ -333,6 +333,44 @@ async fn echo_response_test() {
 
 #[tokio::test]
 #[traced_test]
+async fn map_response_test() {
+    let server = MockServer::start().await;
+
+    let responder = echo_response();
+
+    server
+        .register(
+            Mock::given(path("scream"))
+                .mapped_response(|msg| {
+                    if msg.is_text() {
+                        Message::text(msg.to_text().unwrap().to_uppercase())
+                    } else {
+                        msg
+                    }
+                })
+                .expect(1..),
+        )
+        .await;
+
+    let (mut stream, _response) = connect_async(format!("{}/scream", server.uri()))
+        .await
+        .unwrap();
+
+    // Send a message just to show it doesn't change anything.
+    let sent_message = Message::text("hello");
+    stream.send(sent_message.clone()).await.unwrap();
+
+    let shouting = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(Message::text("HELLO"), shouting);
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
+
+#[tokio::test]
+#[traced_test]
 async fn ensure_close_frame_sent() {
     let server = MockServer::start().await;
 

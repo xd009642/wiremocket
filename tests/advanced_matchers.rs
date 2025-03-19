@@ -1,5 +1,9 @@
+use async_stream::stream;
+use futures::stream::BoxStream;
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
 use tungstenite::Message;
@@ -241,6 +245,64 @@ async fn mock_overloading_match() {
     stream.send(Message::text(val.to_string())).await.unwrap();
     stream.send(Message::text("hello world")).await.unwrap();
     stream.send(Message::Close(None)).await.unwrap();
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
+
+pub struct FibonacciResponder;
+
+impl ResponseStream for FibonacciResponder {
+    fn handle(&self, input: broadcast::Receiver<Message>) -> BoxStream<'static, Message> {
+        let mut input = BroadcastStream::new(input);
+        let stream = stream! {
+            let mut i = 0;
+            let mut next = 1;
+            let mut last = 1;
+            for await value in input {
+                if i == next {
+                    yield Message::text(i.to_string());
+                    let temp_next = next + last;
+                    last = next;
+                    next = temp_next;
+                }
+                i += 1;
+            }
+        };
+        stream.boxed()
+    }
+}
+
+#[tokio::test]
+#[traced_test]
+async fn sparse_responder() {
+    let server = MockServer::start().await;
+
+    server
+        .register(
+            Mock::given(path("fibonacci"))
+                .set_responder(FibonacciResponder)
+                .expect(1..),
+        )
+        .await;
+
+    let (mut stream, _response) = connect_async(format!("{}/fibonacci", server.uri()))
+        .await
+        .unwrap();
+
+    let expected = [1, 2, 3, 5, 8, 13];
+    for _ in 0..14 {
+        stream
+            .send(Message::Text(Default::default()))
+            .await
+            .unwrap();
+    }
+
+    for i in &expected {
+        let s = stream.next().await.unwrap().unwrap();
+        assert_eq!(Message::text(i.to_string()), s);
+    }
 
     std::mem::drop(stream);
 

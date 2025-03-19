@@ -73,8 +73,6 @@ pub struct Mock {
 
 impl Mock {
     /// Start building a [`Mock`] specifying the first matcher.
-    ///
-    /// TODO this should return a builder actually.
     pub fn given(matcher: impl Match + Send + Sync + 'static) -> MockBuilder {
         MockBuilder {
             matcher: vec![Arc::new(matcher)],
@@ -242,7 +240,7 @@ impl MockBuilder {
     }
 
     /// For each `Message` from the client respond with a `Message`.
-    pub fn one_to_one_response<F>(mut self, map_fn: F) -> Self
+    pub fn mapped_response<F>(mut self, map_fn: F) -> Self
     where
         F: Fn(Message) -> Message + Send + Sync + 'static,
     {
