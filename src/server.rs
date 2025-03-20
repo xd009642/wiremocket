@@ -339,7 +339,7 @@ impl MockServer {
     /// You can use `MockServer::builder` if you need to apply configuration outside of the
     /// default. If this is not within your usecase just use [`MockServer::start`].
     pub fn builder() -> MockServerBuilder {
-        MockServerBuilder::default()
+        Default::default()
     }
 
     /// Start a new instance of a MockServer listening on a random port.
@@ -440,5 +440,18 @@ impl Drop for MockServer {
     fn drop(&mut self) {
         let tx = self.shutdown.take().unwrap();
         let _ = tx.send(());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn supply_own_listener() {
+        let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = MockServer::builder().listener(listener).build().await;
+        assert!(server.uri().contains(&addr.to_string()));
     }
 }

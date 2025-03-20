@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
+use futures::{stream, SinkExt, StreamExt};
 use serde_json::json;
 use tokio_tungstenite::connect_async;
 use tracing_test::traced_test;
@@ -336,12 +336,10 @@ async fn echo_response_test() {
 async fn map_response_test() {
     let server = MockServer::start().await;
 
-    let responder = echo_response();
-
     server
         .register(
             Mock::given(path("scream"))
-                .mapped_response(|msg| {
+                .response_map(|msg| {
                     if msg.is_text() {
                         Message::text(msg.to_text().unwrap().to_uppercase())
                     } else {
@@ -363,6 +361,35 @@ async fn map_response_test() {
     let shouting = stream.next().await.unwrap().unwrap();
 
     assert_eq!(Message::text("HELLO"), shouting);
+
+    std::mem::drop(stream);
+
+    assert!(server.mocks_pass().await);
+}
+
+#[tokio::test]
+#[traced_test]
+async fn stream_response_test() {
+    let server = MockServer::start().await;
+
+    server
+        .register(
+            Mock::given(path("count"))
+                .response_stream(|| {
+                    stream::iter(vec![1, 2, 3, 4, 5, 6]).map(|x| Message::text(x.to_string()))
+                })
+                .expect(1..),
+        )
+        .await;
+
+    let (mut stream, _response) = connect_async(format!("{}/count", server.uri()))
+        .await
+        .unwrap();
+
+    for i in 1..7 {
+        let val = stream.next().await.unwrap().unwrap();
+        assert_eq!(val, Message::text(i.to_string()));
+    }
 
     std::mem::drop(stream);
 

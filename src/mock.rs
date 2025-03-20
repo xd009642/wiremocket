@@ -240,7 +240,7 @@ impl MockBuilder {
     }
 
     /// For each `Message` from the client respond with a `Message`.
-    pub fn mapped_response<F>(mut self, map_fn: F) -> Self
+    pub fn response_map<F>(mut self, map_fn: F) -> Self
     where
         F: Fn(Message) -> Message + Send + Sync + 'static,
     {

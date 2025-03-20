@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- Renamed `one_to_one_response` to more intuitive `mapped_response` 
+- Renamed `one_to_one_response` to more intuitive `response_map` 
 
 ## [0.2.0] - 2025-03-18
 ### Added
