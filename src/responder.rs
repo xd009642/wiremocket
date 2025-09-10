@@ -78,7 +78,7 @@ pub trait ResponseStream {
     fn handle(&self, input: broadcast::Receiver<Message>) -> BoxStream<'static, Message>;
 }
 
-/// Typpe to hold streaming responses where a stream of server messages independent of the client
+/// Type to hold streaming responses where a stream of server messages independent of the client
 /// input is returned.
 pub struct StreamResponse {
     stream_ctor: Arc<dyn Fn() -> BoxStream<'static, Message> + Send + Sync + 'static>,
